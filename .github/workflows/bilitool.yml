@@ -86,9 +86,9 @@ jobs:
           Ray_Serilog__WriteTo__3__Args__botToken:    ${{ secrets.TG_BOT_TOKEN }}
           Ray_Serilog__WriteTo__3__Args__chatId:      ${{ secrets.TG_CHAT_ID }}
           Ray_Serilog__WriteTo__9__Args__token:       ${{ secrets.PUSHPLUS_TOKEN }}
-        run: dotnet run --project "${{ steps.proj.outputs.path }}" -c Release
+        run: dotnet run --project "${{ steps.proj.outputs.path }}" -c Release 2>&1 | tee /tmp/task-output.log
 
-      # --- 飞书通知（无论成功失败都推送）---
+      # --- 飞书通知（无论成功失败都推送，含任务专属汇报模板）---
       - name: 飞书通知
         if: always()
         env:
@@ -96,4 +96,6 @@ jobs:
           NOTIFY_TITLE:  'B站日常任务'
           NOTIFY_TASK:   ${{ steps.decide.outputs.tasks }}
           NOTIFY_STATUS: ${{ steps.execute.outcome }}
-        run: node lottery/notify-feishu.js
+        run: |
+          export NOTIFY_OUTPUT=$(cat /tmp/task-output.log 2>/dev/null | tail -200)
+          node lottery/notify-feishu.js
