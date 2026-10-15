@@ -1,0 +1,87 @@
+# =============================================================================
+# BA站日常任务 —— BiliBiliToolPro (C#/.NET Console)
+# 上游：https://github.com/RayWangQvQ/BiliBiliToolPro
+# -----------------------------------------------------------------------------
+# 触发方式：
+#   1) schedule 类人类作息（北京时间）
+#      09:00 每日任务+VIP+漫画+银换硬币 | 12:00 直播抽奖 | 19:00 直播抽奖+粉丝勋章
+#   2) workflow_dispatch 手动选任务
+# cookie 从 Secrets 注入（与抽奖 workflow 共用 BILI_COOKIE，扫一次码）。
+# 注：本 job 设 continue-on-error，若 .NET 环境问题不阻塞抽奖 workflow。
+# =============================================================================
+name: B站日常任务
+
+on:
+  schedule:
+    - cron: '0 1 * * *'      # 北京 09:00 — 每日任务+VIP大积分+漫画+银换硬币+VIP权益
+    - cron: '0 4 * * *'      # 北京 12:00 — 直播间天选抽奖
+    - cron: '0 11 * * *'     # 北京 19:00 — 直播间天选抽奖+粉丝勋章
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: '任务(逗号分隔，如 Daily,LiveLottery,VipBigPoint)'
+        default: 'Daily,LiveLottery'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true   # 尽力而为：.NET 构建失败不阻塞抽奖
+    steps:
+      - name: 决定任务
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TASKS="${{ inputs.tasks }}"
+          else
+            case "${{ github.event.schedule }}" in
+              "0 1 * * *")  TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
+              "0 4 * * *")  TASKS="LiveLottery";;
+              "0 11 * * *") TASKS="LiveLottery,LiveFansMedal";;
+              *)            TASKS="Daily";;
+            esac
+          fi
+          echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "::notice::本次执行任务: $TASKS"
+
+      - name: 检查 cookie
+        env:
+          BILI_COOKIE: ${{ secrets.BILI_COOKIE }}
+        run: |
+          [ -n "$BILI_COOKIE" ] || { echo "::error::未配置 BILI_COOKIE"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: 克隆 BiliBiliToolPro 上游
+        run: git clone --depth 1 https://github.com/RayWangQvQ/BiliBiliToolPro.git bilitool-src
+
+      # --- .NET 10 SDK（上游 Dockerfile 用 sdk:10.0）---
+      - name: 安装 .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 定位 Console 项目
+        id: proj
+        run: |
+          CSPROJ=$(find bilitool-src -name "Ray.BiliBiliTool.Console.csproj" | head -1)
+          if [ -z "$CSPROJ" ]; then
+            echo "::error::未找到 Ray.BiliBiliTool.Console.csproj"
+            exit 1
+          fi
+          echo "path=$CSPROJ" >> "$GITHUB_OUTPUT"
+          echo "Console 项目: $CSPROJ"
+
+      # --- 执行（cookie + 任务通过 Ray_ 前缀环境变量注入）---
+      - name: 执行任务 ${{ steps.decide.outputs.tasks }}
+        env:
+          Ray_RunTasks:                              ${{ steps.decide.outputs.tasks }}
+          Ray_BiliBiliCookies__1:                     ${{ secrets.BILI_COOKIE }}
+          Ray_BiliBiliCookies__2:                     ${{ secrets.BILI_COOKIE_2 }}
+          Ray_Security__IntervalSecondsBetweenRequestApi: '20'
+          Ray_Security__RandomSleepMaxMin:            '0'
+          # 通知（可选，从 Secrets 注入；按需在仓库 Secrets 配置）
+          Ray_Serilog__WriteTo__3__Args__botToken:    ${{ secrets.TG_BOT_TOKEN }}
+          Ray_Serilog__WriteTo__3__Args__chatId:      ${{ secrets.TG_CHAT_ID }}
+          Ray_Serilog__WriteTo__9__Args__token:       ${{ secrets.PUSHPLUS_TOKEN }}
+        run: dotnet run --project "${{ steps.proj.outputs.path }}" -c Release
