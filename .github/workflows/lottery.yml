@@ -90,4 +90,16 @@ jobs:
 
       # --- 执行 ---
       - name: 执行 ${{ steps.decide.outputs.cmd }}
+        id: execute
+        continue-on-error: true
         run: cd lottery-src && node main.js ${{ steps.decide.outputs.cmd }}
+
+      # --- 飞书通知（无论成功失败都推送）---
+      - name: 飞书通知
+        if: always()
+        env:
+          FS_WEBHOOK:    ${{ secrets.FS_WEBHOOK }}
+          NOTIFY_TITLE:  '动态抽奖'
+          NOTIFY_TASK:   ${{ steps.decide.outputs.cmd }}
+          NOTIFY_STATUS: ${{ steps.execute.outcome }}
+        run: node lottery/notify-feishu.js
