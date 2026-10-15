@@ -1,8 +1,15 @@
 # Lottery-BiliBiliToolB-Web233
 
-> **B 站一站式自动化**：把 [LotteryAutoScript](https://github.com/shanmiteko/LotteryAutoScript)（动态抽奖）与 [BiliBiliToolPro](https://github.com/RayWangQvQ/BiliBiliToolPro)（日常任务 + Web 面板）合并为一个 **Docker Compose** 服务。
+> **B 站一站式自动化**：把 [LotteryAutoScript](https://github.com/shanmiteko/LotteryAutoScript)（动态抽奖）与 [BiliBiliToolPro](https://github.com/RayWangQvQ/BiliBiliToolPro)（日常任务 + Web 面板）合并为统一方案。
 >
-> **扫一次码，两边共用**：在 BiliBiliToolPro 面板扫码登录，cookie 自动同步给抽奖服务；两边 cookie 一起刷新。Build 后 `docker compose up -d`，扫码即用。
+> **两种运行方式，按需选择：**
+>
+> | 方式 | 适合人群 | 特点 |
+> |------|---------|------|
+> | **Docker Compose**（默认） | 有服务器/NAS | Web 管理面板、扫码登录、cookie 自动同步、实时状态页 |
+> | **GitHub Actions**（无需服务器） | 不想维护服务器 | 零运维、cookie 存 Secrets、定时自动跑、每月约 100–200 分钟额度 |
+>
+> 两种方式**扫一次码，两边共用**，均采用**类人类作息**定时，保留两个上游 GPL-3.0 更新渠道。
 
 ---
 
@@ -49,7 +56,7 @@
 
 ---
 
-## 🚀 快速开始（Debian x86）
+## 🚀 快速开始（Docker Compose 版）
 
 ### 1. 安装 Docker（如未安装）
 ```bash
@@ -133,22 +140,26 @@ bash scripts/update.sh
 
 ```
 Lottery-BiliBiliToolB-Web233/
-├── docker-compose.yml          # 四服务编排
+├── docker-compose.yml          # 四服务编排（Docker Compose 版）
 ├── .env.example                # 环境变量模板
+├── .github/workflows/
+│   ├── lottery.yml             #   动态抽奖 workflow（GitHub Actions 版）
+│   └── bilitool.yml            #   B站日常任务 workflow（GitHub Actions 版）
 ├── nginx/default.conf          # 统一入口：/ 进面板，/lottery/ 进抽奖
-├── lottery/                    # 抽奖服务（自建镜像）
-│   ├── Dockerfile              #   build 时 clone LotteryAutoScript 上游
-│   ├── entrypoint.sh           #   软链接配置 + cron + 状态页
+├── lottery/                    # 抽奖服务
+│   ├── Dockerfile              #   build 时 clone LotteryAutoScript 上游（Docker 版）
+│   ├── entrypoint.sh           #   软链接配置 + cron + 状态页（Docker 版）
 │   ├── status-server.js        #   极简 Express 状态页（胶水层，不侵入上游）
-│   ├── crontab-lottery         #   类人类作息定时
-│   ├── env.example.js          #   账号+推送配置模板（优化注释）
-│   └── my_config.example.js    #   抽奖行为配置模板（类人类作息）
-├── sync/                       # cookie 同步胶水层
+│   ├── crontab-lottery         #   类人类作息定时（Docker 版 cron）
+│   ├── env.example.js          #   账号+推送配置模板（两种方式共用）
+│   ├── my_config.example.js    #   抽奖行为配置模板（类人类作息，两种方式共用）
+│   └── inject-cookie.js        #   从 Secrets 注入 cookie（GitHub Actions 版）
+├── sync/                       # cookie 同步胶水层（Docker 版）
 │   ├── Dockerfile
 │   ├── sync_cookie.py          #   SQLite→env.js，自动探测表结构
 │   └── supervisord.conf
-├── scripts/setup.sh            # 一键初始化
-├── scripts/update.sh           # 一键更新
+├── scripts/setup.sh            # 一键初始化（Docker 版）
+├── scripts/update.sh           # 一键更新（Docker 版）
 ├── docs/UPGRADE-BLAZOR.md      # 可选：把抽奖页真嵌进 Blazor 面板
 └── bili_tool_web/              # 面板数据（运行时生成，勿提交）
 ```
@@ -166,6 +177,102 @@ docker compose down             # 停止
 docker exec -it lottery sh      # 进抽奖容器
 docker exec -it bili_tool_web /bin/bash  # 进面板容器
 ```
+
+---
+
+## 🚀 GitHub Actions 启动方式（无需服务器）
+
+> 不想维护服务器？本仓库内置 GitHub Actions workflow，Fork 后配个 Secret 就能跑，**零运维**。
+
+### 与 Docker Compose 版的对比
+
+| 特性 | Docker Compose 版 | GitHub Actions 版 |
+|------|-------------------|-------------------|
+| 运行环境 | 自有服务器 / NAS | GitHub Actions（免费） |
+| 是否需要服务器 | ✅ 需要 | ❌ 不需要 |
+| Web 管理面板 | ✅ 有（Blazor 面板，端口 22330） | ❌ 无 |
+| Cookie 管理 | Web 面板扫码 / 自动同步 | GitHub Secrets（手动更新） |
+| 定时方式 | 系统 cron | GitHub cron |
+| 实时状态查看 | Web 面板实时 | Actions 运行日志 |
+| 适合人群 | 有服务器、想要 Web 面板 | 不想维护服务器 |
+
+### 快速开始（Actions 版）
+
+#### 1. Fork 本仓库
+
+点击右上角 **Fork** 按钮，将本仓库 Fork 到你的 GitHub 账号。
+
+> ⚠️ **建议将 Fork 后的仓库设为私有** — Actions 运行日志可能包含账号相关信息。Settings → General → Danger Zone → Change visibility → Private。
+
+#### 2. 获取 B 站 cookie
+
+1. 浏览器登录 [B 站](https://www.bilibili.com)，按 `F12` → `Network` 标签
+2. 刷新页面，找任意请求 → `Headers` → 复制 `Cookie` 字段完整值
+3. 确认包含 `SESSDATA=xxxx` 字段
+
+#### 3. 配置 GitHub Secrets
+
+进入 **Settings → Secrets and variables → Actions → New repository secret**：
+
+| Secret 名称 | 必填 | 说明 |
+|-------------|------|------|
+| `BILI_COOKIE` | ✅ | 主账号 cookie（含 SESSDATA） |
+| `BILI_COOKIE_2` | ❌ | 第二个账号 cookie（多账号） |
+| `BILI_COOKIE_3` | ❌ | 第三个账号 cookie（多账号） |
+| `TG_BOT_TOKEN` | ❌ | Telegram Bot Token（可选通知） |
+| `TG_CHAT_ID` | ❌ | Telegram Chat ID（可选通知） |
+| `PUSHPLUS_TOKEN` | ❌ | PushPlus Token（可选通知） |
+
+#### 4. 启用 Actions
+
+进入 **Actions** 标签 → 如提示则点击 **"I understand my workflows, go ahead and enable them"**。两个 workflow 会按类人类作息自动定时运行。
+
+#### 5. 手动测试（可选）
+
+**Actions → 动态抽奖 → Run workflow** → 选命令 → 运行。或 **Actions → B站日常任务 → Run workflow** → 输入任务列表 → 运行。
+
+### Actions 版类人类作息时间表
+
+所有时间为**北京时间**（cron 用 UTC，已自动换算）。
+
+**动态抽奖**（`.github/workflows/lottery.yml`）：
+
+| 北京时间 | 动作 | 说明 |
+|---------|------|------|
+| 08:30 | `check` | 起床检查中奖 |
+| 12:10 | `start` | 午休参与抽奖 |
+| 19:30 | `start` | 晚饭后参与抽奖 |
+| 22:00 | `check` | 睡前检查中奖 |
+| 周日 23:00 | `clear` | 每周清理动态/关注 |
+
+**B 站日常任务**（`.github/workflows/bilitool.yml`）：
+
+| 北京时间 | 任务 | 说明 |
+|---------|------|------|
+| 09:00 | `Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege` | 每日任务+VIP大积分+漫画+银换硬币+VIP权益 |
+| 12:00 | `LiveLottery` | 直播间天选抽奖 |
+| 19:00 | `LiveLottery,LiveFansMedal` | 直播间天选抽奖+粉丝勋章 |
+
+> 🌙 **0:00–7:00 为睡眠期，不安排任何任务。**
+
+### Actions 版运行原理
+
+```
+GitHub Actions 触发
+  ├─ actions/checkout@v4          # 检出本仓库（配置模板 + inject-cookie.js）
+  ├─ git clone 上游仓库            # 每次拉最新代码（保留更新渠道）
+  ├─ 注入 cookie（从 Secrets）     # inject-cookie.js 写入 env.js
+  └─ 执行命令                      # node main.js / dotnet run
+```
+
+本项目**不复制上游源码**，每次运行 `git clone --depth 1` 拉取上游最新代码，上游更新后下次运行自动生效。
+
+### Actions 版注意事项
+
+- **免费额度**：私有仓库每月 2000 分钟，本项目约消耗 100–200 分钟/月；公开仓库无限制
+- **Cookie 有效期**：约 30 天，过期后需重新获取并更新 Secrets
+- **cron 延迟**：GitHub scheduled workflow 可能延迟几分钟，不保证准时
+- **保持活跃**：公开仓库 60 天无活动 workflow 会被自动禁用，偶尔手动 Run 一次即可
 
 ---
 
