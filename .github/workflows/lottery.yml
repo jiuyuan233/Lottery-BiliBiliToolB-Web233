@@ -92,9 +92,11 @@ jobs:
       - name: 执行 ${{ steps.decide.outputs.cmd }}
         id: execute
         continue-on-error: true
-        run: cd lottery-src && node main.js ${{ steps.decide.outputs.cmd }}
+        run: |
+          cd lottery-src
+          node main.js ${{ steps.decide.outputs.cmd }} 2>&1 | tee /tmp/task-output.log
 
-      # --- 飞书通知（无论成功失败都推送）---
+      # --- 飞书通知（无论成功失败都推送，含任务专属汇报模板）---
       - name: 飞书通知
         if: always()
         env:
@@ -102,4 +104,6 @@ jobs:
           NOTIFY_TITLE:  '动态抽奖'
           NOTIFY_TASK:   ${{ steps.decide.outputs.cmd }}
           NOTIFY_STATUS: ${{ steps.execute.outcome }}
-        run: node lottery/notify-feishu.js
+        run: |
+          export NOTIFY_OUTPUT=$(cat /tmp/task-output.log 2>/dev/null | tail -200)
+          node lottery/notify-feishu.js
