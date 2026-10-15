@@ -1,0 +1,39 @@
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+本合并项目沿用两个上游项目的 GPL-3.0 协议。
+完整协议文本见 https://www.gnu.org/licenses/gpl-3.0.txt
+
+上游声明：
+  - LotteryAutoScript  https://github.com/shanmiteko/LotteryAutoScript   (GPL-3.0)
+  - BiliBiliToolPro    https://github.com/RayWangQvQ/BiliBiliToolPro     (GPL-3.0)
+
+完整 GPL-3.0 文本如下（摘要：可自由使用/修改/再发布，衍生作品须同样以 GPL-3.0 开源，不提供任何担保）：
+
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
+
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+the GNU General Public License is intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.  We, the Free Software Foundation, use the
+GNU General Public License for most of our software; it applies also to
+any other work released this way by its authors.  You can apply it to
+your programs, too.
+
+  For the full license text, see:
+  https://www.gnu.org/licenses/gpl-3.0.txt
