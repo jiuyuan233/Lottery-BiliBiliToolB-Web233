@@ -1,0 +1,44 @@
+# =============================================================================
+# 飞书推送测试 —— 手动触发，发一条测试消息到飞书验证配置
+# =============================================================================
+# 使用前提：仓库 Secrets 中已配置 FS_WEBHOOK（飞书自定义机器人 webhook URL）
+# 触发方式：Actions → 飞书推送测试 → Run workflow → 可自定义消息内容
+# =============================================================================
+name: 飞书推送测试
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: '测试消息内容（留空则发卡片通知）'
+        default: ''
+      title:
+        description: '通知标题'
+        default: '飞书推送测试'
+      status:
+        description: '模拟状态'
+        type: choice
+        default: success
+        options:
+          - success
+          - failure
+          - cancelled
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: 发送飞书测试消息
+        env:
+          FS_WEBHOOK:    ${{ secrets.FS_WEBHOOK }}
+          NOTIFY_TITLE:  ${{ inputs.title }}
+          NOTIFY_TASK:   '推送测试'
+          NOTIFY_STATUS: ${{ inputs.status }}
+          NOTIFY_MESSAGE: ${{ inputs.message }}
+        run: node lottery/notify-feishu.js
