@@ -1,0 +1,103 @@
+# =============================================================================
+# Lottery-BiliBiliToolB-Web233  统一编排
+# -----------------------------------------------------------------------------
+# 把两个上游项目合并为一个「扫码即用」的 Docker 服务：
+#   1. bili_tool_web  —— RayWangQvQ/BiliBiliToolPro 的 Web 面板（C#/.NET）
+#                        负责扫码登录、cookie 自动刷新、B 站日常任务
+#   2. lottery       —— shanmiteko/LotteryAutoScript（Node.js）
+#                        负责动态抽奖、中奖检测、清理动态
+#   3. cookie-sync   —— 胶水层：把 bili_tool_web 的 cookie 同步给 lottery
+#   4. nginx         —— 统一入口：/ 进面板，/lottery/ 进抽奖状态页
+#
+# 设计原则：
+#   * 只扫一次码 —— 在 bili_tool_web 面板扫码，cookie-sync 自动喂给 lottery
+#   * 两边 cookie 都刷新 —— bili_tool_web 自动刷新，同步脚本每 5 分钟轮询
+#   * 类人类作息 —— 抽奖/检查安排在早中晚活跃时段，避开 0-7 点睡眠期
+#   * 保留更新渠道 —— bili_tool_web 用官方镜像(pull 即更新)，lottery build 时 clone 上游
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # 1) BiliBiliToolPro Web 面板（扫码登录 + 日常任务 + cookie 自动刷新）
+  #    上游：https://github.com/RayWangQvQ/BiliBiliToolPro
+  #    镜像：官方 ghcr.io/raywangqvq/bili_tool_web
+  # ---------------------------------------------------------------------------
+  bili_tool_web:
+    image: ghcr.io/raywangqvq/bili_tool_web:${BILITOOL_TAG:-latest}
+    container_name: bili_tool_web
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./bili_tool_web/config:/app/config   # 账号库 BiliBiliTool.db 在这里（共享给 cookie-sync）
+      - ./bili_tool_web/Logs:/app/Logs
+    expose:
+      - "8080"
+    # 不直接对外暴露端口，统一走 nginx；如需直连可取消下面注释
+    # ports:
+    #   - "22330:8080"
+
+  # ---------------------------------------------------------------------------
+  # 2) LotteryAutoScript 动态抽奖（Node.js）
+  #    上游：https://github.com/shanmiteko/LotteryAutoScript
+  #    自建镜像：build 时 clone 上游源码 + 装一个极简状态页
+  # ---------------------------------------------------------------------------
+  lottery:
+    build:
+      context: ./lottery
+      dockerfile: Dockerfile
+    image: lottery-web233:latest
+    container_name: lottery
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./lottery/data:/app/data             # env.js / my_config.js / 日志（与 cookie-sync 共享）
+    expose:
+      - "3000"                               # 状态页端口（nginx /lottery/ 反代到这里）
+
+  # ---------------------------------------------------------------------------
+  # 3) cookie-sync 胶水层
+  #    每 5 分钟从 bili_tool_web 的 SQLite 库导出 cookie，写入 lottery 的 env.js
+  #    这样「扫一次码」即可同时驱动两个服务，且两边 cookie 一起刷新
+  # ---------------------------------------------------------------------------
+  cookie-sync:
+    build:
+      context: ./sync
+      dockerfile: Dockerfile
+    container_name: cookie-sync
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SYNC_INTERVAL: ${SYNC_INTERVAL:-300}  # 同步间隔(秒)，默认 5 分钟
+    volumes:
+      - ./bili_tool_web/config:/bili_config:ro   # 只读账号库
+      - ./lottery/data:/lottery_data             # 写入 env.js
+
+  # ---------------------------------------------------------------------------
+  # 4) nginx 统一入口
+  #    /          -> bili_tool_web:8080  (BiliBiliToolPro 面板，扫码登录入口)
+  #    /lottery/  -> lottery:3000        (抽奖状态页 + 手动触发)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: bili-nginx
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${WEB_PORT:-22330}:80"              # 对外统一端口，默认 22330
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - bili_tool_web
+      - lottery
+
+# =============================================================================
+# 数据卷说明（bind mount，便于查看与备份）：
+#   ./bili_tool_web/config/BiliBiliTool.db  账号库（扫码后 cookie 存这里）
+#   ./bili_tool_web/Logs/                   面板日志
+#   ./lottery/data/env.js                   抽奖账号/推送配置（cookie-sync 自动写）
+#   ./lottery/data/my_config.js             抽奖行为配置（类人类作息，手动调）
+#   ./lottery/data/logs/                    抽奖运行日志
+# =============================================================================
