@@ -74,6 +74,8 @@ jobs:
 
       # --- 执行（cookie + 任务通过 Ray_ 前缀环境变量注入）---
       - name: 执行任务 ${{ steps.decide.outputs.tasks }}
+        id: execute
+        continue-on-error: true
         env:
           Ray_RunTasks:                              ${{ steps.decide.outputs.tasks }}
           Ray_BiliBiliCookies__1:                     ${{ secrets.BILI_COOKIE }}
@@ -85,3 +87,13 @@ jobs:
           Ray_Serilog__WriteTo__3__Args__chatId:      ${{ secrets.TG_CHAT_ID }}
           Ray_Serilog__WriteTo__9__Args__token:       ${{ secrets.PUSHPLUS_TOKEN }}
         run: dotnet run --project "${{ steps.proj.outputs.path }}" -c Release
+
+      # --- 飞书通知（无论成功失败都推送）---
+      - name: 飞书通知
+        if: always()
+        env:
+          FS_WEBHOOK:    ${{ secrets.FS_WEBHOOK }}
+          NOTIFY_TITLE:  'B站日常任务'
+          NOTIFY_TASK:   ${{ steps.decide.outputs.tasks }}
+          NOTIFY_STATUS: ${{ steps.execute.outcome }}
+        run: node lottery/notify-feishu.js
