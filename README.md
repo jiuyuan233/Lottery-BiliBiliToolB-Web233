@@ -219,6 +219,7 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 | `BILI_COOKIE` | ✅ | 主账号 cookie（含 SESSDATA） |
 | `BILI_COOKIE_2` | ❌ | 第二个账号 cookie（多账号） |
 | `BILI_COOKIE_3` | ❌ | 第三个账号 cookie（多账号） |
+| `FS_WEBHOOK` | ❌ | 飞书自定义机器人 webhook URL（可选通知） |
 | `TG_BOT_TOKEN` | ❌ | Telegram Bot Token（可选通知） |
 | `TG_CHAT_ID` | ❌ | Telegram Chat ID（可选通知） |
 | `PUSHPLUS_TOKEN` | ❌ | PushPlus Token（可选通知） |
@@ -230,6 +231,18 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 #### 5. 手动测试（可选）
 
 **Actions → 动态抽奖 → Run workflow** → 选命令 → 运行。或 **Actions → B站日常任务 → Run workflow** → 输入任务列表 → 运行。
+
+#### 6. 飞书推送（可选）
+
+任务执行完后自动推送结果到飞书群：
+
+1. 在飞书群聊中添加**自定义机器人**（群设置 → 群机器人 → 添加机器人 → 自定义机器人）
+2. 复制 webhook URL，存到仓库 Secrets：名称 `FS_WEBHOOK`
+3. 测试推送：**Actions → 飞书推送测试 → Run workflow** → 发一条测试消息
+
+推送效果（卡片消息）：
+- ✅ 成功时绿色卡片，❌ 失败时红色卡片
+- 包含任务名称、执行状态、北京时间、Actions 日志链接
 
 ### Actions 版类人类作息时间表
 
