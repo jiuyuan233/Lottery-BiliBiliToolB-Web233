@@ -25,7 +25,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     continue-on-error: true   # 尽力而为：.NET 构建失败不阻塞抽奖
     steps:
       - name: 决定任务
