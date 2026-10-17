@@ -33,7 +33,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 不设 timeout-minutes，用 GitHub 默认 6 小时（最大值），避免任务被杀死
     steps:
       # --- 根据触发方式决定命令 ---
       - name: 决定命令
