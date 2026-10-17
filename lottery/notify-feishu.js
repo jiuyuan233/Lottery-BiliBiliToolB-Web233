@@ -154,6 +154,43 @@ function extractMetric(patterns, log) {
 }
 
 // =============================================================================
+// 🎉 中奖检测 — 从日志中检测中奖并提取详情
+// =============================================================================
+function detectWin(log) {
+    const winKeywords = [
+        /恭喜.*?中奖/, /中奖.*?\d+/, /🎉.*?中奖/,
+        /恭喜.*?获得/, /获得.*?奖品/, /天选.*?奖励/,
+        /抽奖.*?结果.*?中奖/, /您.*?中奖/, /你.*?中奖/,
+    ];
+    for (const p of winKeywords) {
+        if (p.test(log)) return true;
+    }
+    return false;
+}
+
+function extractWinDetails(log) {
+    const details = [];
+    const prizePatterns = [
+        /奖品[:：]\s*(.+)/g,
+        /恭喜.*?获得[:：]?\s*(.+)/g,
+        /中奖[:：]\s*(.+)/g,
+        /获得[:：]\s*(.+)/g,
+        /天选.*?奖励[:：]\s*(.+)/g,
+        /🎉(.+)/g,
+    ];
+    for (const p of prizePatterns) {
+        let match;
+        while ((match = p.exec(log)) !== null) {
+            const text = match[1] && match[1].trim();
+            if (text && text.length > 1 && text.length < 80) {
+                if (!details.includes(text)) details.push(text);
+            }
+        }
+    }
+    return details.slice(0, 5); // 最多 5 条
+}
+
+// =============================================================================
 // 状态映射
 // =============================================================================
 const STATUS_MAP = {
@@ -181,6 +218,10 @@ if (process.argv[2]) {
     const subTasks = task.split(',').map(t => t.trim()).filter(Boolean);
     const elements = [];
 
+    // 🎉 中奖检测
+    const isWin = detectWin(output);
+    const winDetails = isWin ? extractWinDetails(output) : [];
+
     // 状态行
     let headerText = title;
     if (subTasks.length === 1) {
@@ -190,8 +231,32 @@ if (process.argv[2]) {
         headerText = `${title}（${subTasks.length} 个任务）`;
     }
 
+    // 🎉 中奖时覆盖标题和颜色（最高优先级）
+    if (isWin) {
+        headerText = '🎉🎉🎉 中奖通知！';
+        st.color = 'carmine';   // 深红色 — 最醒目
+        st.emoji = '🎉';
+    }
+
     // 内容
-    let content = `${st.emoji} **状态：${st.label}**`;
+    let content = '';
+
+    // 🎉 中奖强调（放在最顶部，最醒目）
+    if (isWin) {
+        content += '\n# 🎉🎉 恭喜中奖！🎉🎉\n';
+        content += '**>>> 请尽快查看奖品详情 <<<**\n';
+        if (winDetails.length > 0) {
+            content += '\n**🏆 中奖详情：**\n';
+            for (const d of winDetails) {
+                content += `  🎁 **${d}**\n`;
+            }
+        } else {
+            content += '\n🏆 **检测到中奖，请查看日志了解详情**\n';
+        }
+        content += '\n---\n\n';
+    }
+
+    content += `${st.emoji} **状态：${st.label}**`;
     content += `\n🕐 **时间：** ${timeStr}`;
     if (repo) content += `\n📦 **仓库：** ${repo}`;
 
