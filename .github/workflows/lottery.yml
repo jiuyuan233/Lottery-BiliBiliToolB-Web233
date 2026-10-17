@@ -33,7 +33,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       # --- 根据触发方式决定命令 ---
       - name: 决定命令
