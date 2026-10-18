@@ -12,11 +12,11 @@ name: 动态抽奖
 
 on:
   schedule:
-    - cron: '30 0 * * *'     # 北京 08:30 — 起床检查中奖
-    - cron: '10 4 * * *'     # 北京 12:10 — 午休参与抽奖
-    - cron: '30 11 * * *'    # 北京 19:30 — 晚饭后参与抽奖
-    - cron: '0 14 * * *'     # 北京 22:00 — 睡前检查中奖
-    - cron: '0 15 * * 0'     # 周日北京 23:00 — 清理动态/关注
+    - cron: '33 0 * * *'     # 北京 08:33 — 起床检查中奖（错峰避整点）
+    - cron: '13 4 * * *'     # 北京 12:13 — 午休参与抽奖（错峰）
+    - cron: '33 11 * * *'    # 北京 19:33 — 晚饭后参与抽奖（错峰）
+    - cron: '3 14 * * *'     # 北京 22:03 — 睡前检查中奖（错峰）
+    - cron: '3 15 * * 0'     # 周日北京 23:03 — 清理动态/关注（错峰）
   workflow_dispatch:
     inputs:
       cmd:
@@ -43,11 +43,11 @@ jobs:
             CMD="${{ inputs.cmd }}"
           else
             case "${{ github.event.schedule }}" in
-              "30 0 * * *")  CMD=check;;
-              "10 4 * * *")  CMD=start;;
-              "30 11 * * *") CMD=start;;
-              "0 14 * * *")  CMD=check;;
-              "0 15 * * 0")  CMD=clear;;
+              "33 0 * * *")  CMD=check;;
+              "13 4 * * *")  CMD=start;;
+              "33 11 * * *") CMD=start;;
+              "3 14 * * *")  CMD=check;;
+              "3 15 * * 0")  CMD=clear;;
               *)             CMD=check;;
             esac
           fi
