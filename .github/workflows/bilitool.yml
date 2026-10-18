@@ -13,9 +13,9 @@ name: B站日常任务
 
 on:
   schedule:
-    - cron: '0 1 * * *'      # 北京 09:00 — 每日任务+VIP大积分+漫画+银换硬币+VIP权益
-    - cron: '0 4 * * *'      # 北京 12:00 — 直播间天选抽奖
-    - cron: '0 11 * * *'     # 北京 19:00 — 直播间天选抽奖+粉丝勋章
+    - cron: '3 1 * * *'      # 北京 09:03 — 每日任务+VIP大积分+漫画+银换硬币+VIP权益（错峰）
+    - cron: '7 4 * * *'      # 北京 12:07 — 直播间天选抽奖（错峰）
+    - cron: '3 11 * * *'     # 北京 19:03 — 直播间天选抽奖+粉丝勋章（错峰）
   workflow_dispatch:
     inputs:
       tasks:
@@ -35,9 +35,9 @@ jobs:
             TASKS="${{ inputs.tasks }}"
           else
             case "${{ github.event.schedule }}" in
-              "0 1 * * *")  TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
-              "0 4 * * *")  TASKS="LiveLottery";;
-              "0 11 * * *") TASKS="LiveLottery,LiveFansMedal";;
+              "3 1 * * *")  TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
+              "7 4 * * *")  TASKS="LiveLottery";;
+              "3 11 * * *") TASKS="LiveLottery,LiveFansMedal";;
               *)            TASKS="Daily";;
             esac
           fi
