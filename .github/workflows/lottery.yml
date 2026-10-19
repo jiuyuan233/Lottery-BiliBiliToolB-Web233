@@ -4,7 +4,13 @@
 # -----------------------------------------------------------------------------
 # 触发方式：
 #   1) schedule 类人类作息（北京时间，cron 用 UTC，北京=UTC+8）
-#      08:30 检查中奖 | 12:10 参与抽奖 | 19:30 参与抽奖 | 22:00 检查中奖 | 周日 23:00 清理
+#      08:33 检查中奖
+#      10:33 参与抽奖（上午，timeout 8分钟≈转发8条）
+#      12:13 参与抽奖（中午，timeout 8分钟≈转发8条）
+#      19:33 参与抽奖（晚上，timeout 8分钟≈转发8条）
+#      22:03 检查中奖
+#      周日 23:03 清理
+#      → 三次 start 间隔均超过 1 小时，发够 8 条就休息
 #   2) workflow_dispatch 手动选命令
 # cookie 从仓库 Secrets 注入（BILI_COOKIE），扫一次码两边共用。
 # =============================================================================
@@ -13,8 +19,9 @@ name: 动态抽奖
 on:
   schedule:
     - cron: '33 0 * * *'     # 北京 08:33 — 起床检查中奖（错峰避整点）
-    - cron: '13 4 * * *'     # 北京 12:13 — 午休参与抽奖（错峰）
-    - cron: '33 11 * * *'    # 北京 19:33 — 晚饭后参与抽奖（错峰）
+    - cron: '33 2 * * *'     # 北京 10:33 — 上午参与抽奖（错峰，timeout 8分钟≈8条）
+    - cron: '13 4 * * *'     # 北京 12:13 — 午休参与抽奖（错峰，timeout 8分钟≈8条）
+    - cron: '33 11 * * *'    # 北京 19:33 — 晚饭后参与抽奖（错峰，timeout 8分钟≈8条）
     - cron: '3 14 * * *'     # 北京 22:03 — 睡前检查中奖（错峰）
     - cron: '3 15 * * 0'     # 周日北京 23:03 — 清理动态/关注（错峰）
   workflow_dispatch:
@@ -44,6 +51,7 @@ jobs:
           else
             case "${{ github.event.schedule }}" in
               "33 0 * * *")  CMD=check;;
+              "33 2 * * *")  CMD=start;;
               "13 4 * * *")  CMD=start;;
               "33 11 * * *") CMD=start;;
               "3 14 * * *")  CMD=check;;
@@ -88,13 +96,20 @@ jobs:
       - name: 安装依赖
         run: cd lottery-src && npm install --omit=dev
 
-      # --- 执行 ---
+      # --- 执行（start 命令用 timeout 限制 8 分钟≈转发 8 条，发够就停）---
       - name: 执行 ${{ steps.decide.outputs.cmd }}
         id: execute
         continue-on-error: true
         run: |
           cd lottery-src
-          node main.js ${{ steps.decide.outputs.cmd }} 2>&1 | tee /tmp/task-output.log
+          CMD=${{ steps.decide.outputs.cmd }}
+          if [ "$CMD" = "start" ]; then
+            echo "::notice::start 模式：timeout 480s（8分钟）≈ 转发 8 条后自动停止"
+            timeout 480 node main.js start 2>&1 | tee /tmp/task-output.log
+            echo "::notice::start 执行结束（可能因 timeout 正常停止）"
+          else
+            node main.js "$CMD" 2>&1 | tee /tmp/task-output.log
+          fi
 
       # --- 飞书通知（无论成功失败都推送，含任务专属汇报模板）---
       - name: 飞书通知
