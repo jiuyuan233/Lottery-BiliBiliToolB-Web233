@@ -2,30 +2,37 @@
 # LotteryAutoScript 定时任务 —— 类人类作息
 # -----------------------------------------------------------------------------
 # 模拟一个「白天活跃、夜里睡觉」的真实用户行为节奏，降低被风控的概率：
-#   * 08:30  起床后先看看有没有中奖          (check)
-#   * 12:10  午休刷动态，参与一波抽奖        (start)
-#   * 19:30  晚饭后活跃高峰，再参与一波      (start)
-#   * 22:00  睡前检查中奖结果                (check)
-#   * 周日 23:00  周末清理一下临时关注/动态   (clear)
-# 0:00-7:59 不执行任何任务（睡眠期）。
+#   * 08:33  起床后先看看有没有中奖          (check)
+#   * 10:33  上午参与抽奖（timeout 8分钟≈8条）(start)
+#   * 12:13  午休刷动态，参与一波抽奖        (start, timeout 8分钟≈8条)
+#   * 19:33  晚饭后活跃高峰，再参与一波      (start, timeout 8分钟≈8条)
+#   * 22:03  睡前检查中奖结果                (check)
+#   * 周日 23:03  周末清理一下临时关注/动态   (clear)
+# 0:00-8:00 不执行任何任务（睡眠期）。
+# 三次 start 间隔均超过 1 小时，发够 8 条就休息，避免短时间大量转发。
 # -----------------------------------------------------------------------------
 # 格式：分 时 日 月 周  命令
 # PATH 含 node 所在目录；日志统一写到 /app/data/logs/lottery.log 供状态页读取。
+# start 命令用 timeout 480s 限制运行时长（8条×45s≈6-8分钟），到时间自动停。
 # =============================================================================
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 SHELL=/bin/sh
 
-# 早 8:30 —— 起床检查中奖
-30 8 * * * cd /app && node main.js check  >> /app/data/logs/lottery.log 2>&1
+# 早 8:33 —— 起床检查中奖（错峰避整点）
+33 8 * * * cd /app && node main.js check  >> /app/data/logs/lottery.log 2>&1
 
-# 午 12:10 —— 午休参与抽奖
-10 12 * * * cd /app && node main.js start >> /app/data/logs/lottery.log 2>&1
+# 上午 10:33 —— 参与抽奖（timeout 8分钟≈转发8条后自动停）
+33 10 * * * cd /app && timeout 480 node main.js start >> /app/data/logs/lottery.log 2>&1
 
-# 晚 19:30 —— 晚饭后活跃高峰参与抽奖
-30 19 * * * cd /app && node main.js start >> /app/data/logs/lottery.log 2>&1
+# 午 12:13 —— 午休参与抽奖（timeout 8分钟≈转发8条后自动停）
+13 12 * * * cd /app && timeout 480 node main.js start >> /app/data/logs/lottery.log 2>&1
 
-# 晚 22:00 —— 睡前检查中奖
-0 22 * * * cd /app && node main.js check  >> /app/data/logs/lottery.log 2>&1
+# 晚 19:33 —— 晚饭后活跃高峰参与抽奖（timeout 8分钟≈转发8条后自动停）
+33 19 * * * cd /app && timeout 480 node main.js start >> /app/data/logs/lottery.log 2>&1
 
-# 周日 23:00 —— 周末清理临时关注与转发动态
-0 23 * * 0 cd /app && node main.js clear  >> /app/data/logs/lottery.log 2>&1
+# 晚 22:03 —— 睡前检查中奖（错峰）
+3 22 * * * cd /app && node main.js check  >> /app/data/logs/lottery.log 2>&1
+
+# 周日 23:03 —— 周末清理临时关注与转发动态（错峰）
+3 23 * * 0 cd /app && node main.js clear  >> /app/data/logs/lottery.log 2>&1
+
