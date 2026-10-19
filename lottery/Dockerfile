@@ -11,9 +11,12 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# 安装构建期与运行期系统依赖：git(克隆上游) cron(定时) ca-certificates
+# 安装构建期与运行期系统依赖：git(克隆上游) cron(定时) ca-certificates tzdata(时区)
+# 设置时区为 Asia/Shanghai，确保 crontab 里的时间按北京时间执行（非 UTC）
+ENV TZ=Asia/Shanghai
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git cron ca-certificates tini \
+    && apt-get install -y --no-install-recommends git cron ca-certificates tini tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && rm -rf /var/lib/apt/lists/*
 
 # 克隆上游 LotteryAutoScript 源码并安装依赖
