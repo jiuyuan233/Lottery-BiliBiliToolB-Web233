@@ -102,7 +102,7 @@ bash scripts/setup.sh
 
 **抽奖策略（已在 `my_config.example.js` 中配好）：**
 - **① 官方+非官方都转**：`model: '11'`，官方和非官方抽奖都参与，最大化中奖机会。
-- **② 避免黑号**：每转发 7~8 个抽奖后，自动发 1~2 条随机动态（看推荐视频 / 点赞 / 评论 / 转发 / 三连），向 B 站证明是活人。两个程序独立运行、启动顺序错峰混合。
+- **② 避免黑号**：`create_dy: true`，每转发 7~8 个抽奖后，自动发 1~2 条随机动态（看推荐视频 / 点赞 / 评论 / 转发 / 三连），向 B 站证明是活人。两个程序独立运行、启动顺序错峰混合。
 - **③ 控制转发量**：每次运行 timeout 8分钟（≈转发8条），上午/中午/晚上各一次，发够8条休息1小时以上。
 
 
@@ -132,6 +132,9 @@ push_parm: {
 ---
 
 ## 🔄 更新（保留两个上游更新渠道）
+
+
+> ⚠️ **时区说明**：Docker 容器已设置 `TZ=Asia/Shanghai`（Dockerfile 安装 `tzdata` + 设置 `localtime`），crontab 里的时间按**北京时间**执行。如你之前用过旧镜像，需重新构建：`docker compose build lottery && docker compose up -d lottery`。验证：`docker exec lottery date` 应显示 CST 时区。
 
 ```bash
 bash scripts/update.sh
