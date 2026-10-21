@@ -96,7 +96,7 @@ jobs:
       - name: 安装依赖
         run: cd lottery-src && npm install --omit=dev
 
-      # --- 执行（start 命令用 timeout 限制 8 分钟≈转发 26 条，发够就停）---
+      # --- 执行（start 命令用 timeout 限制 20 分钟≈转发 26 条，发够就停）---
       - name: 执行 ${{ steps.decide.outputs.cmd }}
         id: execute
         continue-on-error: true
