@@ -13,7 +13,7 @@
 # -----------------------------------------------------------------------------
 # 格式：分 时 日 月 周  命令
 # PATH 含 node 所在目录；日志统一写到 /app/data/logs/lottery.log 供状态页读取。
-# start 命令用 timeout 1200s 限制运行时长（26条×45s≈6-20分钟），到时间自动停。
+# start 命令用 timeout 1200s 限制运行时长（26条×45s≈20分钟），到时间自动停。
 # =============================================================================
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 SHELL=/bin/sh
@@ -21,13 +21,13 @@ SHELL=/bin/sh
 # 早 8:33 —— 起床检查中奖（错峰避整点）
 33 8 * * * cd /app && node main.js check  >> /app/data/logs/lottery.log 2>&1
 
-# 上午 10:33 —— 参与抽奖（timeout 20分钟≈转发26条后自动停）
+# 上午 10:33 —— 参与抽奖（timeout 8分钟≈转发8条后自动停）
 33 10 * * * cd /app && timeout 1200 node main.js start >> /app/data/logs/lottery.log 2>&1
 
-# 午 12:13 —— 午休参与抽奖（timeout 20分钟≈转发26条后自动停）
+# 午 12:13 —— 午休参与抽奖（timeout 8分钟≈转发8条后自动停）
 13 12 * * * cd /app && timeout 1200 node main.js start >> /app/data/logs/lottery.log 2>&1
 
-# 晚 19:33 —— 晚饭后活跃高峰参与抽奖（timeout 20分钟≈转发26条后自动停）
+# 晚 19:33 —— 晚饭后活跃高峰参与抽奖（timeout 8分钟≈转发8条后自动停）
 33 19 * * * cd /app && timeout 1200 node main.js start >> /app/data/logs/lottery.log 2>&1
 
 # 晚 22:03 —— 睡前检查中奖（错峰）
