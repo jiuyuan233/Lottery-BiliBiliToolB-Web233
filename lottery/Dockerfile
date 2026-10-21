@@ -24,9 +24,11 @@ RUN apt-get update \
 RUN git clone --depth 1 https://github.com/shanmiteko/LotteryAutoScript.git . \
     && npm install --omit=dev
 
-# 外挂胶水层：极简 Express 状态页（运行日志 + 手动触发 + cookie 状态）
+# 外挂胶水层：状态页 + 飞书推送 + 任务包装脚本（不侵入上游源码）
 COPY status-server.js ./status-server.js
-RUN npm install express --no-save
+COPY notify-feishu.js ./notify-feishu.js
+COPY run-task.sh ./run-task.sh
+RUN npm install express --no-save && chmod +x ./run-task.sh
 
 # 类人类作息定时任务（早中晚活跃时段，避开 0-7 点睡眠期）
 COPY crontab-lottery /etc/cron.d/lottery
