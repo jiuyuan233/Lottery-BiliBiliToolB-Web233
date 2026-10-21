@@ -67,6 +67,17 @@ app.post('/api/run', (req, res) => {
   execFile('node', ['main.js', cmd], { cwd: '/app', timeout: 1000 * 60 * 30 }, (err, stdout, stderr) => {
     const out = (stdout || '') + (stderr || '');
     try { fs.appendFileSync(LOG_FILE, out + '\n'); } catch {}
+
+    // 飞书推送（与 cron / Actions 版一致）
+    const notifyEnv = {
+      ...process.env,
+      NOTIFY_TITLE: '动态抽奖',
+      NOTIFY_TASK: cmd,
+      NOTIFY_STATUS: err ? 'failure' : 'success',
+      NOTIFY_OUTPUT: out.split('\n').slice(-200).join('\n'),
+    };
+    execFile('node', ['notify-feishu.js'], { cwd: '/app', env: notifyEnv }, () => {});
+
     res.json({ cmd, ok: !err, err: err ? err.message : null, output: out.slice(-4000) });
   });
 });
