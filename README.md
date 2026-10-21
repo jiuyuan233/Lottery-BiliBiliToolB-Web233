@@ -126,8 +126,24 @@ push_parm: {
     TG_USER_ID: '987654321',
     // 或钉钉：
     // DD_BOT_TOKEN: 'xxx', DD_BOT_SECRET: 'SECxxx',
+    // 或飞书（推荐，Docker 版自动推送抽奖结果卡片）：
+    // FS_BOT_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxx',
 }
 ```
+
+### 📨 飞书推送（Docker 版，与 Actions 版一致）
+
+Docker 版每次 cron 定时执行和状态页手动触发后，自动推送飞书卡片通知（与 Actions 版功能完全一致）：
+
+1. 在飞书群聊中添加**自定义机器人**（群设置 → 群机器人 → 添加机器人 → 自定义机器人）
+2. 复制 webhook URL
+3. 编辑 `lottery/data/env.js`，在 `push_parm` 里填入 `FS_BOT_WEBHOOK`
+4. 下次 cron 执行或状态页手动触发时，自动推送飞书卡片
+
+推送效果（与 Actions 版完全一致）：
+- ✅ 成功时绿色卡片，❌ 失败时红色卡片，🎉 中奖时深红色醒目卡片
+- 包含任务名称、执行状态、北京时间、关键指标（检索/转发/评论/点赞数）
+- 中奖时自动提取奖品详情，放在卡片最顶部
 
 ---
 
