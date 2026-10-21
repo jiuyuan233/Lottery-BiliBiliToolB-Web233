@@ -20,9 +20,19 @@
  */
 
 const https = require('https');
+const fs = require('fs');
 
 // --- 读取配置 ---
-const webhook = process.env.FS_WEBHOOK;
+// 优先读环境变量 FS_WEBHOOK（GitHub Actions 版）
+// fallback 从 env.js 读 push_parm.FS_BOT_WEBHOOK（Docker 版）
+let webhook = process.env.FS_WEBHOOK;
+if (!webhook) {
+    try {
+        const envContent = fs.readFileSync('./env.js', 'utf8');
+        const match = /FS_BOT_WEBHOOK:\s*['"]([^'"]+)['"]/.exec(envContent);
+        if (match && match[1]) webhook = match[1];
+    } catch (e) { /* Actions 版没有 env.js 在同目录，忽略 */ }
+}
 const title   = process.env.NOTIFY_TITLE   || 'B站任务通知';
 const task    = process.env.NOTIFY_TASK    || '';
 const status  = process.env.NOTIFY_STATUS  || '';
@@ -31,7 +41,7 @@ const repo    = process.env.GITHUB_REPOSITORY || '';
 const runId   = process.env.GITHUB_RUN_ID     || '';
 
 if (!webhook) {
-    console.log('[feishu] 未配置 FS_WEBHOOK，跳过推送');
+    console.log('[feishu] 未配置 FS_WEBHOOK / FS_BOT_WEBHOOK，跳过推送');
     process.exit(0);
 }
 
