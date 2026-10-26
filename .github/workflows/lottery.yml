@@ -105,8 +105,17 @@ jobs:
           CMD=${{ steps.decide.outputs.cmd }}
           if [ "$CMD" = "start" ]; then
             echo "::notice::start 模式：timeout 1200s（20分钟）≈ 转发 26 条后自动停止"
+            set +e
             timeout 1200 node main.js start 2>&1 | tee /tmp/task-output.log
-            echo "::notice::start 执行结束（可能因 timeout 正常停止）"
+            EXIT_CODE=${PIPESTATUS[0]}
+            set -e
+            # 124 = timeout 正常超时停止，视为成功（避免 GitHub 发失败通知邮件）
+            if [ "$EXIT_CODE" -eq 124 ]; then
+              echo "::notice::timeout 1200s 到达，正常停止（不算失败）"
+              EXIT_CODE=0
+            fi
+            echo "::notice::start 执行结束（退出码 $EXIT_CODE）"
+            exit $EXIT_CODE
           else
             node main.js "$CMD" 2>&1 | tee /tmp/task-output.log
           fi
