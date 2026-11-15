@@ -60,6 +60,8 @@
 
 **关键约束**：Web233 是公开仓库，**绝不存任何用户密钥**（无 Secrets）。WebAction 是私有仓库，存 cookie 和飞书 webhook。
 
+**总开关**：两仓库定时任务由仓库变量 `ACTIONS_ENABLED` 控制（`true`=定时执行，`false`/未设=定时跳过，手动触发不受限）。WebAction 设 `true`（自用），Web233 设 `false`（模板不跑）。详见 `docs/ACTIONS-SWITCH.md`。
+
 ---
 
 ## 2. 上游依赖
@@ -185,6 +187,10 @@ lottery (Node.js)
 **执行流程**（逐 step 讲解）：
 
 ```
+Step 0: 总开关（job 级 if）
+  └─ schedule 触发时要求仓库变量 ACTIONS_ENABLED=true，否则整个 job 跳过
+  └─ 手动 workflow_dispatch 不受开关限制
+
 Step 1: 决定命令
   ├─ 手动触发 → 用 inputs.cmd
   └─ 定时触发 → case github.event.schedule 匹配 cron → 映射到 start/check/clear
@@ -218,21 +224,23 @@ Step 9: 飞书通知 (if: always())
   └─ node lottery/notify-feishu.js  ← 解析日志 → 飞书卡片
 ```
 
-**cron 时间表**（UTC，北京时间 = UTC + 8）：
+**cron 时间表**（UTC，北京时间 = UTC + 8；统一**提前 30 分钟起跑**对冲 GitHub schedule 延迟，目标时段不变）：
 
-| cron (UTC) | 北京时间 | 命令 | 说明 |
-|------------|---------|------|------|
-| `33 0 * * *` | 08:33 | check | 起床检查中奖 |
-| `33 2 * * *` | 10:33 | start | 上午参与抽奖 |
-| `13 4 * * *` | 12:13 | start | 午休参与抽奖 |
-| `33 11 * * *` | 19:33 | start | 晚饭后参与抽奖 |
-| `3 14 * * *` | 22:03 | check | 睡前检查中奖 |
-| `3 15 * * 0` | 周日 23:03 | clear | 周末清理 |
+| cron (UTC) | 起跑（北京） | 目标时段 | 命令 | 说明 |
+|------------|---------|------|------|------|
+| `3 0 * * *` | 08:03 | 08:33 | check | 起床检查中奖 |
+| `3 2 * * *` | 10:03 | 10:33 | start | 上午参与抽奖 |
+| `43 3 * * *` | 11:43 | 12:13 | start | 午休参与抽奖 |
+| `3 11 * * *` | 19:03 | 19:33 | start | 晚饭后参与抽奖 |
+| `33 13 * * *` | 21:33 | 22:03 | check | 睡前检查中奖 |
+| `33 14 * * 0` | 周日 22:33 | 周日 23:03 | clear | 周末清理 |
 
 **关键设计**：
 - `continue-on-error: true` — 执行失败不阻塞飞书通知
 - `timeout 1200` — start 命令限时 20 分钟
 - `if: always()` — 无论成功失败都推送飞书
+- cron 提前 30 分钟 — 对冲 GitHub schedule 延迟（见 `docs/ACTIONS-SCHEDULE.md`）
+- 飞书静默时段 — 北京时间 23:00–07:00 完成的任务不推送，只记 Actions 日志
 
 ### 5.2 `bilitool.yml` — B站日常任务 workflow
 
@@ -245,13 +253,13 @@ Step 9: 飞书通知 (if: always())
 - 任务通过 `Ray_RunTasks` 环境变量指定
 - `continue-on-error: true` 在 job 级别 — .NET 构建失败不阻塞抽奖 workflow
 
-**cron 时间表**：
+**cron 时间表**（同样提前 30 分钟起跑）：
 
-| cron (UTC) | 北京时间 | 任务 |
-|------------|---------|------|
-| `3 1 * * *` | 09:03 | Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege |
-| `7 4 * * *` | 12:07 | LiveLottery |
-| `3 11 * * *` | 19:03 | LiveLottery,LiveFansMedal |
+| cron (UTC) | 起跑（北京） | 目标时段 | 任务 |
+|------------|---------|------|------|
+| `33 0 * * *` | 08:33 | 09:03 | Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege |
+| `37 3 * * *` | 11:37 | 12:07 | LiveLottery |
+| `33 10 * * *` | 18:33 | 19:03 | LiveLottery,LiveFansMedal |
 
 **Ray_ 环境变量映射**（.NET 强类型配置）：
 - `Ray_RunTasks` → 执行哪些任务
@@ -263,6 +271,7 @@ Step 9: 飞书通知 (if: always())
 ### 5.3 `feishu-test.yml` — 飞书推送测试
 
 手动触发，发一条测试消息验证 `FS_WEBHOOK` 配置是否正确。支持自定义消息内容、标题、模拟状态。
+**不受总开关与飞书静默时段限制**（纯手动测试入口）。
 
 ### 5.4 `inject-cookie.js` — cookie 注入脚本
 
@@ -482,15 +491,17 @@ ENTRYPOINT ["/usr/bin/tini", "--", "./entrypoint.sh"]
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 SHELL=/bin/sh
 
-33 8 * * *  cd /app && node main.js check  >> /app/data/logs/lottery.log 2>&1
-33 10 * * * cd /app && timeout 1200 node main.js start >> ... 2>&1
-13 12 * * * cd /app && timeout 1200 node main.js start >> ... 2>&1
-33 19 * * * cd /app && timeout 1200 node main.js start >> ... 2>&1
-3 22 * * *  cd /app && node main.js check  >> ... 2>&1
-3 23 * * 0  cd /app && node main.js clear  >> ... 2>&1
+33 8 * * *  cd /app && ./run-task.sh check
+33 10 * * * cd /app && ./run-task.sh start 1200
+13 12 * * * cd /app && ./run-task.sh start 1200
+33 19 * * * cd /app && ./run-task.sh start 1200
+3 22 * * *  cd /app && ./run-task.sh check
+3 23 * * 0  cd /app && ./run-task.sh clear
 ```
 
-**与 Actions 版的区别**：Docker 容器内时区已设为 `Asia/Shanghai`，所以 cron 直接用北京时间。Actions 版 cron 用 UTC（已自动换算）。
+每行调用的是 **`run-task.sh` 包装脚本**（Dockerfile COPY 进镜像）：负责执行命令 + 把输出写入 `/app/data/logs/lottery.log` + 调用 `notify-feishu.js` 推送飞书卡片（从 `env.js` 读 `FS_BOT_WEBHOOK`），与 Actions 版通知行为一致。`start` 命令的第二参数 `1200` = timeout 限时 20 分钟，124（超时）视为成功。
+
+**与 Actions 版的区别**：Docker 容器内时区已设为 `Asia/Shanghai`，所以 cron 直接用北京时间。Actions 版 cron 用 UTC（已自动换算，且提前 30 分钟起跑对冲 GitHub schedule 延迟）。Docker 版 cron 秒级精确、不进凌晨，故未设飞书静默时段（Actions 版有 23:00–07:00 静默）。
 
 ### 6.4 `lottery/entrypoint.sh` — 容器入口
 
@@ -666,10 +677,10 @@ node main.js start  ← 通过软链接读 env.js
 模拟一个「白天活跃、夜里睡觉」的真实用户行为节奏：
 
 ```
-时间轴（北京时间）：
-  0────7────8────12───13───19───22───23
-  │睡眠期│起床│午休│    │晚饭│睡前│清理│
-  │不执行│check│start│    │start│check│clear│
+时间轴（北京时间，图为起跑时间；cron 已统一提前 30 分钟，目标时段 = 起跑 + 30 分钟内）：
+  0────7────8────10───12───19───21───22───23
+  │睡眠期│起床│上午│午休│晚饭│睡前│ —— │清理│
+  │不执行│check│start│start│start│check│    │clear│
 ```
 
 ### 8.2 错峰设计
@@ -682,9 +693,9 @@ node main.js start  ← 通过软链接读 env.js
 
 | 时段 | 间隔 | 说明 |
 |------|------|------|
-| 三次 start | >1小时 | 10:33→12:13（1h40m）→19:33（7h20m） |
-| check 与 start | >2小时 | 08:33→10:33（2h） |
-| 睡眠期 | 8小时 | 22:03→次日08:33 |
+| 三次 start | >1小时 | 10:03→11:43（1h40m）→19:03（7h20m） |
+| check 与 start | >2小时 | 08:03→10:03（2h） |
+| 睡眠期 | 10.5小时 | 21:33 check → 次日 08:03（0–7 点无任务） |
 
 ### 8.4 timeout 限制
 
@@ -698,8 +709,9 @@ node main.js start  ← 通过软链接读 env.js
 | | GitHub Actions | Docker cron |
 |---|---|---|
 | 时区 | UTC（需换算） | Asia/Shanghai（Dockerfile 设了 tzdata） |
-| cron 格式 | `'33 2 * * *'`（UTC 02:33=北京10:33） | `33 10 * * *`（直接北京时间） |
-| 延迟 | 可能延迟几分钟到几小时 | 秒级精确 |
+| cron 格式 | `'3 2 * * *'`（UTC 02:03=北京10:03 起跑） | `33 10 * * *`（直接北京时间） |
+| 延迟 | 可能延迟几分钟到几小时（cron 已提前 30 分钟对冲） | 秒级精确 |
+| 飞书静默 | 23:00–07:00（北京）不推送 | 无需（cron 本身不进凌晨） |
 
 ---
 
@@ -814,16 +826,16 @@ const winKeywords = [
 **Actions 版**（`lottery.yml`）：
 ```yaml
 schedule:
-  - cron: '33 2 * * *'  # 改这里（UTC 时间 = 北京时间 - 8）
+  - cron: '3 2 * * *'  # 改这里（UTC 时间 = 北京时间 - 8；提前 30 分钟起跑对冲延迟）
 ```
-同时修改 `case` 语句里的 cron 匹配：
+同时修改 `case` 语句里的 cron 匹配（两处必须一致，否则定时触发会落到默认分支）：
 ```yaml
-"33 2 * * *")  CMD=start;;
+"3 2 * * *")   CMD=start;;
 ```
 
 **Docker 版**（`crontab-lottery`）：
 ```cron
-33 10 * * * cd /app && timeout 1200 node main.js start >> ... 2>&1
+33 10 * * * cd /app && ./run-task.sh start 1200
 ```
 直接改北京时间（容器时区已设为 Asia/Shanghai）。
 
@@ -876,14 +888,16 @@ WebAction 和 Web233 共享的文件必须保持一致：
 - `.github/workflows/lottery.yml`
 - `.github/workflows/bilitool.yml`
 - `.github/workflows/feishu-test.yml`
+- `docs/ACTIONS-SWITCH.md` / `docs/ACTIONS-SCHEDULE.md` / `docs/HANDOFF.md` / `docs/AI-UPDATES.md`
 
 修改任一文件后，需同步到另一个仓库并推送。
 
 ### 11.7 排查 schedule 不触发
 
+0. **先查总开关**：仓库变量 `ACTIONS_ENABLED` 是否为 `true`（`false`/未设时定时触发直接跳过，见 `docs/ACTIONS-SWITCH.md`）
 1. 确认 workflow 文件在默认分支（main/master）
 2. 确认 Actions 已启用（仓库 Actions 页）
-3. schedule 可能延迟几分钟到几小时（GitHub 限制）
+3. schedule 可能延迟几分钟到几小时（GitHub 限制；本仓库已提前 30 分钟起跑对冲）
 4. 频繁修改 workflow 会重置 schedule 注册，需 12-24h 稳定
 5. 公开仓库 60 天无活动 workflow 会被自动禁用
 
@@ -897,22 +911,25 @@ WebAction 和 Web233 共享的文件必须保持一致：
 
 ## 附录：文件清单
 
-### WebAction（私有，10 个文件）
+### WebAction（私有，13 个文件）
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `.github/workflows/lottery.yml` | 124 | 动态抽奖 workflow |
-| `.github/workflows/bilitool.yml` | 101 | 日常任务 workflow |
+| `.github/workflows/lottery.yml` | 145 | 动态抽奖 workflow（含总开关 + 静默时段） |
+| `.github/workflows/bilitool.yml` | 112 | 日常任务 workflow（同上） |
 | `.github/workflows/feishu-test.yml` | 44 | 飞书推送测试 |
 | `lottery/my_config.example.js` | 262 | 抽奖行为配置 |
 | `lottery/env.example.js` | 121 | 账号与推送配置 |
 | `lottery/inject-cookie.js` | 68 | cookie 注入脚本 |
-| `lottery/notify-feishu.js` | 361 | 飞书推送脚本 |
+| `lottery/notify-feishu.js` | 371 | 飞书推送脚本 |
+| `docs/ACTIONS-SWITCH.md` | — | 总开关说明 |
+| `docs/ACTIONS-SCHEDULE.md` | — | 定时策略与静默时段 |
+| `docs/HANDOFF.md` | — | AI 交接文档 |
+| `docs/AI-UPDATES.md` | — | AI 更新仓库指南 |
 | `README.md` | — | 项目文档 |
-| `LICENSE` | — | GPL-3.0 |
-| `.gitignore` | — | Git 忽略 |
+| `LICENSE` / `.gitignore` | — | GPL-3.0 / Git 忽略 |
 
-### Web233（公开，25 个文件）
+### Web233（公开，29 个文件）
 
 在 WebAction 基础上增加：
 
@@ -920,9 +937,10 @@ WebAction 和 Web233 共享的文件必须保持一致：
 |------|------|------|
 | `docker-compose.yml` | 103 | 四服务编排 |
 | `.env.example` | 18 | 环境变量模板 |
-| `lottery/Dockerfile` | 43 | 抽奖容器镜像 |
-| `lottery/crontab-lottery` | 38 | cron 定时 |
+| `lottery/Dockerfile` | 45 | 抽奖容器镜像 |
+| `lottery/crontab-lottery` | 38 | cron 定时（Docker 版，北京时间） |
 | `lottery/entrypoint.sh` | 27 | 容器入口 |
+| `lottery/run-task.sh` | 68 | 任务包装：执行 + 日志 + 飞书推送 |
 | `lottery/status-server.js` | 125 | Express 状态页 |
 | `sync/Dockerfile` | 21 | cookie-sync 镜像 |
 | `sync/sync_cookie.py` | 215 | cookie 同步脚本 |

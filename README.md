@@ -172,10 +172,12 @@ Lottery-BiliBiliToolB-Web233/
 ├── lottery/                    # 抽奖服务
 │   ├── Dockerfile              #   build 时 clone LotteryAutoScript 上游（Docker 版）
 │   ├── entrypoint.sh           #   软链接配置 + cron + 状态页（Docker 版）
+│   ├── run-task.sh             #   任务包装：执行 + 日志 + 飞书推送（Docker 版）
 │   ├── status-server.js        #   极简 Express 状态页（胶水层，不侵入上游）
 │   ├── crontab-lottery         #   类人类作息定时（Docker 版 cron）
 │   ├── env.example.js          #   账号+推送配置模板（两种方式共用）
 │   ├── my_config.example.js    #   抽奖行为配置模板（类人类作息，两种方式共用）
+│   ├── notify-feishu.js        #   飞书推送脚本（两种方式共用）
 │   └── inject-cookie.js        #   从 Secrets 注入 cookie（GitHub Actions 版）
 ├── sync/                       # cookie 同步胶水层（Docker 版）
 │   ├── Dockerfile
@@ -183,7 +185,13 @@ Lottery-BiliBiliToolB-Web233/
 │   └── supervisord.conf
 ├── scripts/setup.sh            # 一键初始化（Docker 版）
 ├── scripts/update.sh           # 一键更新（Docker 版）
-├── docs/UPGRADE-BLAZOR.md      # 可选：把抽奖页真嵌进 Blazor 面板
+├── docs/                       # 文档
+│   ├── DEVELOPMENT.md          #   开发文档（从底层逻辑讲起）
+│   ├── ACTIONS-SWITCH.md       #   Actions 总开关（ACTIONS_ENABLED）
+│   ├── ACTIONS-SCHEDULE.md     #   定时策略与飞书静默时段
+│   ├── HANDOFF.md              #   AI/维护者交接文档
+│   ├── AI-UPDATES.md           #   如何让 AI 更新本仓库
+│   └── UPGRADE-BLAZOR.md       #   可选：把抽奖页真嵌进 Blazor 面板
 └── bili_tool_web/              # 面板数据（运行时生成，勿提交）
 ```
 
@@ -249,7 +257,9 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 
 #### 4. 启用 Actions
 
-进入 **Actions** 标签 → 如提示则点击 **"I understand my workflows, go ahead and enable them"**。两个 workflow 会按类人类作息自动定时运行。
+进入 **Actions** 标签 → 如提示则点击 **"I understand my workflows, go ahead and enable them"**。
+
+**再配置总开关**（本仓库默认关闭定时任务）：**Settings → Secrets and variables → Actions → Variables 标签 → New repository variable**，Name 填 `ACTIONS_ENABLED`，Value 填 `true`。不设或为 `false` 时，定时触发会整体跳过（手动运行不受限）。详见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)。
 
 #### 5. 手动测试（可选）
 
@@ -269,28 +279,28 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 
 ### Actions 版类人类作息时间表
 
-所有时间为**北京时间**（cron 用 UTC，已自动换算）。
+所有时间为**北京时间**（cron 用 UTC，已自动换算）。GitHub schedule 有延迟（几分钟到数小时），所有 cron 统一**提前 30 分钟起跑**，目标时段不变。
 
 **动态抽奖**（`.github/workflows/lottery.yml`）：
 
-| 北京时间 | 动作 | 说明 |
-|---------|------|------|
-| 08:33 | `check` | 起床检查中奖（错峰避整点） |
-| 10:33 | `start` | 上午参与抽奖（timeout 20分钟≈26条） |
-| 12:13 | `start` | 午休参与抽奖（timeout 20分钟≈26条） |
-| 19:33 | `start` | 晚饭后参与抽奖（timeout 20分钟≈26条） |
-| 22:03 | `check` | 睡前检查中奖（错峰） |
-| 周日 23:03 | `clear` | 每周清理动态/关注（错峰） |
+| 起跑 | 目标时段 | 动作 | 说明 |
+|---------|------|------|------|
+| 08:03 | 08:33 | `check` | 起床检查中奖（错峰避整点） |
+| 10:03 | 10:33 | `start` | 上午参与抽奖（timeout 20分钟≈26条） |
+| 11:43 | 12:13 | `start` | 午休参与抽奖（timeout 20分钟≈26条） |
+| 19:03 | 19:33 | `start` | 晚饭后参与抽奖（timeout 20分钟≈26条） |
+| 21:33 | 22:03 | `check` | 睡前检查中奖（错峰） |
+| 周日 22:33 | 周日 23:03 | `clear` | 每周清理动态/关注（错峰） |
 
 **B 站日常任务**（`.github/workflows/bilitool.yml`）：
 
-| 北京时间 | 任务 | 说明 |
-|---------|------|------|
-| 09:00 | `Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege` | 每日任务+VIP大积分+漫画+银换硬币+VIP权益 |
-| 12:00 | `LiveLottery` | 直播间天选抽奖 |
-| 19:00 | `LiveLottery,LiveFansMedal` | 直播间天选抽奖+粉丝勋章 |
+| 起跑 | 目标时段 | 任务 | 说明 |
+|---------|------|------|------|
+| 08:33 | 09:03 | `Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege` | 每日任务+VIP大积分+漫画+银换硬币+VIP权益 |
+| 11:37 | 12:07 | `LiveLottery` | 直播间天选抽奖 |
+| 18:33 | 19:03 | `LiveLottery,LiveFansMedal` | 直播间天选抽奖+粉丝勋章 |
 
-> 🌙 **0:00–7:00 为睡眠期，不安排任何任务。**
+> 🌙 **0:00–7:00 为睡眠期，不安排任何任务。飞书通知静默时段为 23:00–07:00（北京时间），深夜完成的任务不推送，详见 [docs/ACTIONS-SCHEDULE.md](./docs/ACTIONS-SCHEDULE.md)。**
 
 ### Actions 版运行原理
 
@@ -308,7 +318,8 @@ GitHub Actions 触发
 
 - **免费额度**：私有仓库每月 2000 分钟，本项目约消耗 100–200 分钟/月；公开仓库无限制
 - **Cookie 有效期**：约 30 天，过期后需重新获取并更新 Secrets
-- **cron 延迟**：GitHub scheduled workflow 可能延迟几分钟，不保证准时
+- **cron 延迟**：GitHub scheduled workflow 可能延迟几分钟到几小时；本仓库所有 cron 已统一提前 30 分钟起跑对冲常规延迟，且飞书通知在 23:00–07:00（北京）静默，深夜不会弹消息
+- **总开关**：仓库变量 `ACTIONS_ENABLED` 控制定时任务启停（见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)）
 - **保持活跃**：公开仓库 60 天无活动 workflow 会被自动禁用，偶尔手动 Run 一次即可
 
 ---
