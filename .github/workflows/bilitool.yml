@@ -24,6 +24,10 @@ on:
 
 jobs:
   run:
+    # ── 总开关（详见 docs/ACTIONS-SWITCH.md）────────────────────────────
+    # 仓库变量 ACTIONS_ENABLED = true 才执行定时任务；未设/false 时定时触发整体跳过
+    # 手动 workflow_dispatch 不受开关限制，随时可手动测试
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ACTIONS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     # 不设 timeout-minutes，用 GitHub 默认 6 小时（最大值），避免任务被杀死
     continue-on-error: true   # 尽力而为：.NET 构建失败不阻塞抽奖
