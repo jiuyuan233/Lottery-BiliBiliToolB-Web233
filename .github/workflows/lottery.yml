@@ -4,13 +4,15 @@
 # -----------------------------------------------------------------------------
 # 触发方式：
 #   1) schedule 类人类作息（北京时间，cron 用 UTC，北京=UTC+8）
-#      08:33 检查中奖
-#      10:33 参与抽奖（上午，timeout 20分钟≈转发26条）
-#      12:13 参与抽奖（中午，timeout 20分钟≈转发26条）
-#      19:33 参与抽奖（晚上，timeout 20分钟≈转发26条）
-#      22:03 检查中奖
-#      周日 23:03 清理
+#      GitHub schedule 实测有延迟（几分钟到数小时），各时段统一提前 30 分钟起跑，目标时段不变：
+#      08:03 起跑 → 目标 08:33 检查中奖
+#      10:03 起跑 → 目标 10:33 参与抽奖（上午，timeout 20分钟≈转发26条）
+#      11:43 起跑 → 目标 12:13 参与抽奖（中午）
+#      19:03 起跑 → 目标 19:33 参与抽奖（晚上）
+#      21:33 起跑 → 目标 22:03 检查中奖
+#      周日 22:33 起跑 → 目标 23:03 清理
 #      → 三次 start 间隔均超过 1 小时，发够 26 条就休息
+#      飞书静默时段：北京时间 23:00–07:00 不推送，详见 docs/ACTIONS-SCHEDULE.md
 #   2) workflow_dispatch 手动选命令
 # cookie 从仓库 Secrets 注入（BILI_COOKIE），扫一次码两边共用。
 # =============================================================================
@@ -18,12 +20,12 @@ name: 动态抽奖
 
 on:
   schedule:
-    - cron: '33 0 * * *'     # 北京 08:33 — 起床检查中奖（错峰避整点）
-    - cron: '33 2 * * *'     # 北京 10:33 — 上午参与抽奖（错峰，timeout 20分钟≈26条）
-    - cron: '13 4 * * *'     # 北京 12:13 — 午休参与抽奖（错峰，timeout 20分钟≈26条）
-    - cron: '33 11 * * *'    # 北京 19:33 — 晚饭后参与抽奖（错峰，timeout 20分钟≈26条）
-    - cron: '3 14 * * *'     # 北京 22:03 — 睡前检查中奖（错峰）
-    - cron: '3 15 * * 0'     # 周日北京 23:03 — 清理动态/关注（错峰）
+    - cron: '3 0 * * *'      # 北京 08:03 起跑 → 目标 08:33 — 起床检查中奖（错峰避整点）
+    - cron: '3 2 * * *'      # 北京 10:03 起跑 → 目标 10:33 — 上午参与抽奖（错峰，timeout 20分钟≈26条）
+    - cron: '43 3 * * *'     # 北京 11:43 起跑 → 目标 12:13 — 午休参与抽奖（错峰，timeout 20分钟≈26条）
+    - cron: '3 11 * * *'     # 北京 19:03 起跑 → 目标 19:33 — 晚饭后参与抽奖（错峰，timeout 20分钟≈26条）
+    - cron: '33 13 * * *'    # 北京 21:33 起跑 → 目标 22:03 — 睡前检查中奖（错峰）
+    - cron: '33 14 * * 0'    # 周日北京 22:33 起跑 → 目标 23:03 — 清理动态/关注（错峰）
   workflow_dispatch:
     inputs:
       cmd:
@@ -54,12 +56,12 @@ jobs:
             CMD="${{ inputs.cmd }}"
           else
             case "${{ github.event.schedule }}" in
-              "33 0 * * *")  CMD=check;;
-              "33 2 * * *")  CMD=start;;
-              "13 4 * * *")  CMD=start;;
-              "33 11 * * *") CMD=start;;
-              "3 14 * * *")  CMD=check;;
-              "3 15 * * 0")  CMD=clear;;
+              "3 0 * * *")   CMD=check;;
+              "3 2 * * *")   CMD=start;;
+              "43 3 * * *")  CMD=start;;
+              "3 11 * * *")  CMD=start;;
+              "33 13 * * *") CMD=check;;
+              "33 14 * * 0") CMD=clear;;
               *)             CMD=check;;
             esac
           fi
@@ -133,5 +135,11 @@ jobs:
           NOTIFY_TASK:   ${{ steps.decide.outputs.cmd }}
           NOTIFY_STATUS: ${{ steps.execute.outcome }}
         run: |
+          # 飞书静默时段：北京时间 23:00–07:00 不推送（schedule 延迟把任务拖进深夜时避免打扰）
+          HOUR=$(TZ=Asia/Shanghai date +%H)
+          if [ "$HOUR" -ge 23 ] || [ "$HOUR" -lt 7 ]; then
+            echo "::notice::北京时间 $(TZ=Asia/Shanghai date +%H:%M) 处于飞书静默时段（23:00–07:00），跳过推送，结果见 Actions 日志"
+            exit 0
+          fi
           export NOTIFY_OUTPUT=$(cat /tmp/task-output.log 2>/dev/null | tail -200)
           node lottery/notify-feishu.js

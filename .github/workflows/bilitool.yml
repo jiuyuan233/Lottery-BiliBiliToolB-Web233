@@ -3,8 +3,9 @@
 # 上游：https://github.com/RayWangQvQ/BiliBiliToolPro
 # -----------------------------------------------------------------------------
 # 触发方式：
-#   1) schedule 类人类作息（北京时间）
-#      09:00 每日任务+VIP+漫画+银换硬币 | 12:00 直播抽奖 | 19:00 直播抽奖+粉丝勋章
+#   1) schedule 类人类作息（北京时间，GitHub schedule 实测有延迟，统一提前 30 分钟起跑，目标时段不变）
+#      08:33 起跑 → 目标 09:03 每日任务+VIP+漫画+银换硬币 | 11:37 起跑 → 目标 12:07 直播抽奖 | 18:33 起跑 → 目标 19:03 直播抽奖+粉丝勋章
+#      飞书静默时段：北京时间 23:00–07:00 不推送，详见 docs/ACTIONS-SCHEDULE.md
 #   2) workflow_dispatch 手动选任务
 # cookie 从 Secrets 注入（与抽奖 workflow 共用 BILI_COOKIE，扫一次码）。
 # 注：本 job 设 continue-on-error，若 .NET 环境问题不阻塞抽奖 workflow。
@@ -13,9 +14,9 @@ name: B站日常任务
 
 on:
   schedule:
-    - cron: '3 1 * * *'      # 北京 09:03 — 每日任务+VIP大积分+漫画+银换硬币+VIP权益（错峰）
-    - cron: '7 4 * * *'      # 北京 12:07 — 直播间天选抽奖（错峰）
-    - cron: '3 11 * * *'     # 北京 19:03 — 直播间天选抽奖+粉丝勋章（错峰）
+    - cron: '33 0 * * *'     # 北京 08:33 起跑 → 目标 09:03 — 每日任务+VIP大积分+漫画+银换硬币+VIP权益（错峰）
+    - cron: '37 3 * * *'     # 北京 11:37 起跑 → 目标 12:07 — 直播间天选抽奖（错峰）
+    - cron: '33 10 * * *'    # 北京 18:33 起跑 → 目标 19:03 — 直播间天选抽奖+粉丝勋章（错峰）
   workflow_dispatch:
     inputs:
       tasks:
@@ -39,10 +40,10 @@ jobs:
             TASKS="${{ inputs.tasks }}"
           else
             case "${{ github.event.schedule }}" in
-              "3 1 * * *")  TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
-              "7 4 * * *")  TASKS="LiveLottery";;
-              "3 11 * * *") TASKS="LiveLottery,LiveFansMedal";;
-              *)            TASKS="Daily";;
+              "33 0 * * *")  TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
+              "37 3 * * *")  TASKS="LiveLottery";;
+              "33 10 * * *") TASKS="LiveLottery,LiveFansMedal";;
+              *)             TASKS="Daily";;
             esac
           fi
           echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
@@ -101,5 +102,11 @@ jobs:
           NOTIFY_TASK:   ${{ steps.decide.outputs.tasks }}
           NOTIFY_STATUS: ${{ steps.execute.outcome }}
         run: |
+          # 飞书静默时段：北京时间 23:00–07:00 不推送（schedule 延迟把任务拖进深夜时避免打扰）
+          HOUR=$(TZ=Asia/Shanghai date +%H)
+          if [ "$HOUR" -ge 23 ] || [ "$HOUR" -lt 7 ]; then
+            echo "::notice::北京时间 $(TZ=Asia/Shanghai date +%H:%M) 处于飞书静默时段（23:00–07:00），跳过推送，结果见 Actions 日志"
+            exit 0
+          fi
           export NOTIFY_OUTPUT=$(cat /tmp/task-output.log 2>/dev/null | tail -200)
           node lottery/notify-feishu.js
