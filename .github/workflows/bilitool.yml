@@ -2,11 +2,12 @@
 # BA站日常任务 —— BiliBiliToolPro (C#/.NET Console)
 # 上游：https://github.com/RayWangQvQ/BiliBiliToolPro
 # -----------------------------------------------------------------------------
-# 触发方式：
-#   1) schedule 类人类作息（北京时间，GitHub schedule 实测有延迟，统一提前 30 分钟起跑，目标时段不变）
-#      08:33 起跑 → 目标 09:03 每日任务+VIP+漫画+银换硬币 | 11:37 起跑 → 目标 12:07 直播抽奖 | 18:33 起跑 → 目标 19:03 直播抽奖+粉丝勋章
-#      飞书静默时段：北京时间 23:00–07:00 不推送，详见 docs/ACTIONS-SCHEDULE.md
-#   2) workflow_dispatch 手动选任务
+# 双通道定时触发（2026-11-16 重构，详见 docs/ACTIONS-SCHEDULE.md）：
+#   主通道：cron-job.org 准点 POST workflow_dispatch（外部触发基本不排队）
+#   兜底：  GitHub 内置 schedule，按实测延迟统一提前 45 分钟起跑（目标时段不变）
+#   防重复：每个时段一把原子锁（refs/heads/locks/<slot>-<日期>），先到先得——
+#           cron-job.org 或内建兜底谁先抢到锁谁执行，后到的一方自动跳过，绝不重复。
+#   所有触发均受总开关 ACTIONS_ENABLED 控制（force=true 可越过，见 docs/ACTIONS-SWITCH.md）
 # cookie 从 Secrets 注入（与抽奖 workflow 共用 BILI_COOKIE，扫一次码）。
 # 注：本 job 设 continue-on-error，若 .NET 环境问题不阻塞抽奖 workflow。
 # =============================================================================
@@ -14,40 +15,60 @@ name: B站日常任务
 
 on:
   schedule:
-    - cron: '33 0 * * *'     # 北京 08:33 起跑 → 目标 09:03 — 每日任务+VIP大积分+漫画+银换硬币+VIP权益（错峰）
-    - cron: '37 3 * * *'     # 北京 11:37 起跑 → 目标 12:07 — 直播间天选抽奖（错峰）
-    - cron: '33 10 * * *'    # 北京 18:33 起跑 → 目标 19:03 — 直播间天选抽奖+粉丝勋章（错峰）
+    # 兜底起跑 = 目标时段 - 45 分钟（对冲 GitHub schedule 常规延迟；错峰避整点）
+    # 目标时段由主通道 cron-job.org 准点触发，见 docs/ACTIONS-SCHEDULE.md 时段表
+    - cron: '18 0 * * *'    # 兜底：北京 08:18 起跑 → 目标 09:03 每日任务+VIP+漫画+银换硬币（slot=bil-daily-am）
+    - cron: '22 3 * * *'    # 兜底：北京 11:22 起跑 → 目标 12:07 直播间天选抽奖（slot=bil-lot-noon）
+    - cron: '18 10 * * *'   # 兜底：北京 18:18 起跑 → 目标 19:03 直播抽奖+粉丝勋章（slot=bil-lot-pm）
   workflow_dispatch:
     inputs:
       tasks:
         description: '任务(逗号分隔，如 Daily,LiveLottery,VipBigPoint)'
         default: 'Daily,LiveLottery'
+      slot:
+        description: '时段标识（外部定时触发必填，如 bil-daily-am；留空=不参与防重复锁）'
+        required: false
+        default: ''
+      force:
+        description: '强制运行（越过总开关与防重复锁，用于手动测试）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # 防重复锁需要创建/清理 refs/heads/locks/*（只用 GITHUB_TOKEN，不落密钥）
+
+concurrency:
+  group: bilitool-workflow
+  cancel-in-progress: false
 
 jobs:
   run:
     # ── 总开关（详见 docs/ACTIONS-SWITCH.md）────────────────────────────
-    # 仓库变量 ACTIONS_ENABLED = true 才执行定时任务；未设/false 时定时触发整体跳过
-    # 手动 workflow_dispatch 不受开关限制，随时可手动测试
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.ACTIONS_ENABLED == 'true' }}
+    # 定时触发与外部触发（cron-job.org 的 workflow_dispatch）同样受开关控制；
+    # 手动 Run workflow 时勾选 force=true 可越过开关与防重复锁（测试用）
+    if: ${{ vars.ACTIONS_ENABLED == 'true' || github.event.inputs.force == 'true' }}
     runs-on: ubuntu-latest
     # 不设 timeout-minutes，用 GitHub 默认 6 小时（最大值），避免任务被杀死
     continue-on-error: true   # 尽力而为：.NET 构建失败不阻塞抽奖
     steps:
-      - name: 决定任务
+      - name: 决定任务与时段
         id: decide
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TASKS="${{ inputs.tasks }}"
+            SLOT="${{ inputs.slot }}"
           else
+            SLOT=""
             case "${{ github.event.schedule }}" in
-              "33 0 * * *")  TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
-              "37 3 * * *")  TASKS="LiveLottery";;
-              "33 10 * * *") TASKS="LiveLottery,LiveFansMedal";;
-              *)             TASKS="Daily";;
+              "18 0 * * *")  SLOT=bil-daily-am; TASKS="Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege";;
+              "22 3 * * *")  SLOT=bil-lot-noon; TASKS="LiveLottery";;
+              "18 10 * * *") SLOT=bil-lot-pm;   TASKS="LiveLottery,LiveFansMedal";;
+              *)             SLOT="";          TASKS="Daily";;
             esac
           fi
           echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
-          echo "::notice::本次执行任务: $TASKS"
+          echo "slot=$SLOT"    >> "$GITHUB_OUTPUT"
+          echo "::notice::本次执行任务: $TASKS（时段: ${SLOT:-手动/未指定}）"
 
       - name: 检查 cookie
         env:
@@ -55,18 +76,74 @@ jobs:
         run: |
           [ -n "$BILI_COOKIE" ] || { echo "::error::未配置 BILI_COOKIE"; exit 1; }
 
+      # --- 防重复锁：本时段先到先得，后到自动跳过（不 checkout、不占额度） ---
+      - name: 防重复锁
+        id: claim
+        env:
+          SLOT: ${{ steps.decide.outputs.slot }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ] || [ -z "$SLOT" ]; then
+            echo "::notice::强制/手动运行（未指定时段），不参与防重复锁"
+            echo "claimed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DATE=$(TZ=Asia/Shanghai date +%Y%m%d)
+          LOCK="locks/${SLOT}-${DATE}"
+          CODE=$(curl -s -o /tmp/claim.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "{\"ref\":\"refs/heads/${LOCK}\",\"sha\":\"${GITHUB_SHA}\"}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" || echo 000)
+          case "$CODE" in
+            201)
+              echo "claimed=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::抢到本时段锁 ${LOCK}，本时段由本次运行执行"
+              # 顺手清理 7 天前的过期锁（garbage collect，防堆积）
+              OLD_CUT=$(( $(TZ=Asia/Shanghai date +%Y%m%d) - 7 ))
+              for L in $(curl -s -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/heads/locks" \
+                  | jq -r '.[].ref' 2>/dev/null); do
+                NAME="${L#refs/heads/}"
+                D=$(printf '%s\n' "$NAME" | sed -n 's/.*-\([0-9]\{8\}\)$/\1/p')
+                if [ -n "$D" ] && [ "$((10#$D))" -lt "$((10#$OLD_CUT))" ]; then
+                  if curl -s -f -X DELETE -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/heads/${NAME}"; then
+                    echo "::notice::已清理过期锁 ${NAME}"
+                  else
+                    echo "::warning::过期锁 ${NAME} 清理失败（不影响本次运行）"
+                  fi
+                fi
+              done
+              ;;
+            422)
+              echo "claimed=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${LOCK} 已被更早的触发占用（外部 cron-job.org 或内建兜底已执行本时段），本次跳过、不重复执行"
+              ;;
+            *)
+              echo "::warning::锁接口异常（HTTP $CODE），为不漏时段本次照常执行（罕见情况下可能重复）"
+              echo "claimed=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
       - uses: actions/checkout@v4
+        if: steps.claim.outputs.claimed != 'false'
 
       - name: 克隆 BiliBiliToolPro 上游
+        if: steps.claim.outputs.claimed != 'false'
         run: git clone --depth 1 https://github.com/RayWangQvQ/BiliBiliToolPro.git bilitool-src
 
       # --- .NET 10 SDK（上游 Dockerfile 用 sdk:10.0）---
       - name: 安装 .NET 10
+        if: steps.claim.outputs.claimed != 'false'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
       - name: 定位 Console 项目
+        if: steps.claim.outputs.claimed != 'false'
         id: proj
         run: |
           CSPROJ=$(find bilitool-src -name "Ray.BiliBiliTool.Console.csproj" | head -1)
@@ -80,6 +157,7 @@ jobs:
       # --- 执行（cookie + 任务通过 Ray_ 前缀环境变量注入）---
       - name: 执行任务 ${{ steps.decide.outputs.tasks }}
         id: execute
+        if: steps.claim.outputs.claimed != 'false'
         continue-on-error: true
         env:
           Ray_RunTasks:                              ${{ steps.decide.outputs.tasks }}
@@ -93,9 +171,9 @@ jobs:
           Ray_Serilog__WriteTo__9__Args__token:       ${{ secrets.PUSHPLUS_TOKEN }}
         run: dotnet run --project "${{ steps.proj.outputs.path }}" -c Release 2>&1 | tee /tmp/task-output.log
 
-      # --- 飞书通知（无论成功失败都推送，含任务专属汇报模板）---
+      # --- 飞书通知（无论成功失败都推送；防重复跳过的运行不推送）---
       - name: 飞书通知
-        if: always()
+        if: always() && steps.claim.outputs.claimed != 'false'
         env:
           FS_WEBHOOK:    ${{ secrets.FS_WEBHOOK }}
           NOTIFY_TITLE:  'B站日常任务'

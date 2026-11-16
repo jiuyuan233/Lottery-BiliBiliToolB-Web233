@@ -9,31 +9,41 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 
 ## 2. 两仓库部署现状（重要）
 
-| 仓库 | 可见性 | 角色 | Cookie | `ACTIONS_ENABLED` |
-|---|---|---|---|---|
-| `Lottery-BiliBiliToolB-WebAction` | 私有 | **用户自用（生产）** | Secrets 已配（BILI_COOKIE、FS_WEBHOOK、FS_APP_ID、FS_APP_SECRET） | `true`（定时在跑） |
-| `Lottery-BiliBiliToolB-Web233` | 公开 | 模板/分享 | **故意不配**（公开仓库不存密钥） | `false`（定时关闭） |
+| 仓库 | 可见性 | 角色 | Cookie | `ACTIONS_ENABLED` | 外部定时（cron-job.org） |
+|---|---|---|---|---|---|
+| `Lottery-BiliBiliToolB-WebAction` | 私有 | **用户自用（生产）** | Secrets 已配（BILI_COOKIE、FS_WEBHOOK、FS_APP_ID、FS_APP_SECRET） | `true`（双通道在跑） | 9 个时段任务（标题 bili-* 前缀） |
+| `Lottery-BiliBiliToolB-Web233` | 公开 | 模板/分享 | **故意不配**（公开仓库不存密钥） | `false`（定时关闭） | 无（fork 用户自行配置） |
 
 - 两仓库共享文件必须保持一致（清单见 DEVELOPMENT.md §11.6），改一处同步另一处，blob sha 应相同
 - 定时任务总开关：仓库变量 `ACTIONS_ENABLED`，见 [ACTIONS-SWITCH.md](./ACTIONS-SWITCH.md)
-- 所有 cron 统一**提前 30 分钟起跑**（目标时段不变，对冲 GitHub schedule 延迟）；飞书**静默时段 23:00–07:00（北京）**，见 [ACTIONS-SCHEDULE.md](./ACTIONS-SCHEDULE.md)
+- 定时为**双通道**：cron-job.org 外部准点触发为主 + GitHub 内置 schedule 提前 45 分钟兜底，时段**防重复锁先到先得**（同一时段绝不重复，见 [ACTIONS-SCHEDULE.md](./ACTIONS-SCHEDULE.md)）；飞书**静默时段 23:00–07:00（北京）**
 
-## 3. 2026-11-15 交接会话已完成
+## 3. 历次交接会话记录
 
-1. 排查"动态抽奖失败邮件轰炸"：根因是 Web233 无 cookie（设计如此），而 lottery.yml 没有 bilitool.yml 那样的容错
+### 2026-11-15（上一次）
+
+1. 排查“动态抽奖失败邮件轰炸”：根因是 Web233 无 cookie（设计如此），而 lottery.yml 没有 bilitool.yml 那样的容错
 2. 新增 `ACTIONS_ENABLED` 总开关（两个 workflow 的 job 级 `if` + 文档），Web233 定时静默跳过、不再发失败邮件
 3. 所有 cron 提前 30 分钟 + 飞书静默时段（decide 步骤的 case 映射已同步更新——cron 与 case 必须一致）
 4. 审查全部 md 文档并修正过时内容（README 时间表、DEVELOPMENT.md 的 cron 表/crontab 引用/文件清单等）
 5. 在 WebAction 实际触发两个 workflow 冒烟测试通过（结果见 §6）
 
+### 2026-11-16（本次）：双通道定时重构
+
+1. 调取 WebAction Actions 运行历史实测 GitHub schedule 延迟：早间档 0~90 分钟、午间档 2~3.5 小时、晚间档 4~7 小时（连续 3 天至少 8 次拖到次日凌晨），另有整段丢失——确认“凌晨消息”根因
+2. 重构两 workflow：双通道触发（cron-job.org 外部 dispatch 为主 + 内置 schedule 提前 45 分钟兜底）、时段防重复锁（refs/heads/locks/<slot>-<日期>，先到先得、后到自动跳过且不推送）、总开关同时拦截外部触发（force=true 可越过）
+3. cron-job.org 创建 9 个时段任务（仅 WebAction，bili-* 前缀，通知全关）准点 POST workflow_dispatch
+4. 文档同步：ACTIONS-SCHEDULE.md 重写（时段表 + 锁原理 + cron-job.org 教程）、ACTIONS-SWITCH.md（外部触发受控）、两仓库 README、DEVELOPMENT.md（Web233）
+5. 端到端验证通过（锁抢占/跳过、公开仓开关默认关、外部链路）
+
 ## 4. 已知问题与待办
 
-1. **用户 token 安全**：用户曾把全权限 PAT 粘贴进对话，已多次提醒撤销。需要 token 时让用户生成**最小权限**（`contents:write` + `workflow`，仅这两个仓库）新 token，勿复用旧的。
+1. **用户 token 安全**：用户多次把全权限 PAT 粘贴进对话（2026-11-16 又一次），该 PAT 本次已用于仓库推送与 cron-job.org 任务配置（存储于 cron-job.org 的 Authorization Header）。已再次提醒：尽快撤销并换成**最小权限** token（仅这两个仓库，`contents:write` + `workflow`），换后同步更新 cron-job.org 任务 Header。
 2. **Web233 永远不配 cookie**：公开仓库不存密钥是设计约束（DEVELOPMENT.md §1），别"顺手"给它配上。
 3. **Docker 版未实机验证**：只能静态核对 compose/脚本/文档一致性。用户若有服务器，跑 `bash scripts/setup.sh` 走一遍并按 README 快速开始验证。
 4. **cookie 有效期约 30 天**：到期后 WebAction 的 `BILI_COOKIE` 需更新（Secrets 粘贴新值即可）。
 5. **上游结构变更风险**：`inject-cookie.js`（正则替换）与 `sync_cookie.py`（自动探测表结构）对上游变更有一定抗性，但上游若大改 `env.js` 结构需同步适配。
-6. **schedule 丢时段**：GitHub 偶发整段丢定时（历史实测），表现为某天某时段没跑——手动补跑即可，非本仓库 bug。
+6. **schedule 丢时段**：GitHub 偶发整段丢定时（历史实测，如 11-16 早间两档未触发）——现在由 cron-job.org 外部准点触发兜住；两通道都失效才需要手动补跑，非本仓库 bug。
 
 ## 5. 如何更新本仓库（AI 必读）
 
@@ -61,6 +71,8 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 | 要改什么 | 去哪改 | 详见 |
 |---|---|---|
 | 定时时间表 | `lottery.yml`/`bilitool.yml` 的 cron **和** case（两处同步！） | DEVELOPMENT.md §11.1 |
+| 防重复锁 / 时段对照表 | workflow 的「防重复锁」步骤 + ACTIONS-SCHEDULE.md 表 | ACTIONS-SCHEDULE.md |
+| 外部定时任务 | cron-job.org 账号（WebAction 的 9 个 bili-* 任务） | ACTIONS-SCHEDULE.md §cron-job.org |
 | 转发量 | `timeout` 值（Actions + Docker 两处） | DEVELOPMENT.md §11.2 |
 | 抽奖行为 | `lottery/my_config.example.js` | DEVELOPMENT.md §5.6 |
 | cookie 注入逻辑 | `lottery/inject-cookie.js`（Actions）/ `sync/sync_cookie.py`（Docker） | DEVELOPMENT.md §5.4 / §6.6 |

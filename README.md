@@ -259,7 +259,7 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 
 进入 **Actions** 标签 → 如提示则点击 **"I understand my workflows, go ahead and enable them"**。
 
-**再配置总开关**（本仓库默认关闭定时任务）：**Settings → Secrets and variables → Actions → Variables 标签 → New repository variable**，Name 填 `ACTIONS_ENABLED`，Value 填 `true`。不设或为 `false` 时，定时触发会整体跳过（手动运行不受限）。详见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)。
+**再配置总开关**（本仓库默认关闭定时任务）：**Settings → Secrets and variables → Actions → Variables 标签 → New repository variable**，Name 填 `ACTIONS_ENABLED`，Value 填 `true`。不设或为 `false` 时，定时与外部触发都会整体跳过（想临时测试可在 Run workflow 时勾选 `force` 输入）。详见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)。
 
 #### 5. 手动测试（可选）
 
@@ -279,26 +279,35 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 
 ### Actions 版类人类作息时间表
 
-所有时间为**北京时间**（cron 用 UTC，已自动换算）。GitHub schedule 有延迟（几分钟到数小时），所有 cron 统一**提前 30 分钟起跑**，目标时段不变。
+所有时间为**北京时间**（目标时段 = 类人类作息，不变）。
+
+**🔁 双通道触发与防重复（2026-11-16 起）**：GitHub 内置 schedule 实测延迟太大（早间档 0~90 分钟、午间档 2~3.5 小时、晚间档 4~7 小时甚至拖到次日凌晨，还会偶发整段丢时段）。为保证准点且不重复：
+
+- **主通道**：[cron-job.org](https://cron-job.org) 外部准点 `POST workflow_dispatch`（带 `slot` 时段标识），分钟级准点；
+- **兜底**：GitHub 内置 cron **提前 45 分钟起跑**（对冲常规延迟、错峰避整点）；
+- **防重复锁**：每个时段一把原子锁（`refs/heads/locks/<slot>-<日期>`）先到先得——外部和内置谁先到谁执行，后到的一方自动跳过（跳过的运行不推飞书，不发任何消息）；
+- 总开关 `ACTIONS_ENABLED` 同时拦定时与外部触发（`force=true` 可越过）。
+
+cron-job.org 逐步配置教程见 [docs/ACTIONS-SCHEDULE.md](./docs/ACTIONS-SCHEDULE.md)。
 
 **动态抽奖**（`.github/workflows/lottery.yml`）：
 
-| 起跑 | 目标时段 | 动作 | 说明 |
-|---------|------|------|------|
-| 08:03 | 08:33 | `check` | 起床检查中奖（错峰避整点） |
-| 10:03 | 10:33 | `start` | 上午参与抽奖（timeout 20分钟≈26条） |
-| 11:43 | 12:13 | `start` | 午休参与抽奖（timeout 20分钟≈26条） |
-| 19:03 | 19:33 | `start` | 晚饭后参与抽奖（timeout 20分钟≈26条） |
-| 21:33 | 22:03 | `check` | 睡前检查中奖（错峰） |
-| 周日 22:33 | 周日 23:03 | `clear` | 每周清理动态/关注（错峰） |
+| slot 标识 | 主通道（cron-job.org） | 兜底起跑（GitHub cron，北京） | 目标时段 | 动作 |
+|---|---|---|---|---|
+| lot-check-am | 08:33 | 07:48 | 08:33 | `check` 起床检查中奖 |
+| lot-start-am | 10:33 | 09:48 | 10:33 | `start` 上午参与抽奖（timeout 20分钟≈26条） |
+| lot-start-noon | 12:13 | 11:28 | 12:13 | `start` 午休参与抽奖（timeout 20分钟≈26条） |
+| lot-start-pm | 19:33 | 18:48 | 19:33 | `start` 晚饭后参与抽奖（timeout 20分钟≈26条） |
+| lot-check-pm | 22:03 | 21:18 | 22:03 | `check` 睡前检查中奖 |
+| lot-clear-sun | 周日 23:03 | 周日 22:18 | 周日 23:03 | `clear` 每周清理动态/关注 |
 
 **B 站日常任务**（`.github/workflows/bilitool.yml`）：
 
-| 起跑 | 目标时段 | 任务 | 说明 |
-|---------|------|------|------|
-| 08:33 | 09:03 | `Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege` | 每日任务+VIP大积分+漫画+银换硬币+VIP权益 |
-| 11:37 | 12:07 | `LiveLottery` | 直播间天选抽奖 |
-| 18:33 | 19:03 | `LiveLottery,LiveFansMedal` | 直播间天选抽奖+粉丝勋章 |
+| slot 标识 | 主通道（cron-job.org） | 兜底起跑（GitHub cron，北京） | 目标时段 | 任务 |
+|---|---|---|---|---|
+| bil-daily-am | 09:03 | 08:18 | 09:03 | `Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege` 每日任务+VIP大积分+漫画+银换硬币+VIP权益 |
+| bil-lot-noon | 12:07 | 11:22 | 12:07 | `LiveLottery` 直播间天选抽奖 |
+| bil-lot-pm | 19:03 | 18:18 | 19:03 | `LiveLottery,LiveFansMedal` 直播间天选抽奖+粉丝勋章 |
 
 > 🌙 **0:00–7:00 为睡眠期，不安排任何任务。飞书通知静默时段为 23:00–07:00（北京时间），深夜完成的任务不推送，详见 [docs/ACTIONS-SCHEDULE.md](./docs/ACTIONS-SCHEDULE.md)。**
 
@@ -318,9 +327,9 @@ GitHub Actions 触发
 
 - **免费额度**：私有仓库每月 2000 分钟，本项目约消耗 100–200 分钟/月；公开仓库无限制
 - **Cookie 有效期**：约 30 天，过期后需重新获取并更新 Secrets
-- **cron 延迟**：GitHub scheduled workflow 可能延迟几分钟到几小时；本仓库所有 cron 已统一提前 30 分钟起跑对冲常规延迟，且飞书通知在 23:00–07:00（北京）静默，深夜不会弹消息
-- **总开关**：仓库变量 `ACTIONS_ENABLED` 控制定时任务启停（见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)）
-- **保持活跃**：公开仓库 60 天无活动 workflow 会被自动禁用，偶尔手动 Run 一次即可
+- **cron 延迟**：GitHub scheduled workflow 实测延迟可达数小时（晚间档最严重，会拖到次日凌晨）——本仓库采用 cron-job.org 外部准点触发为主、内置 cron 提前 45 分钟兜底、时段防重复锁先到先得；飞书通知在 23:00–07:00（北京）静默，深夜不会弹消息（详见 [docs/ACTIONS-SCHEDULE.md](./docs/ACTIONS-SCHEDULE.md)）
+- **总开关**：仓库变量 `ACTIONS_ENABLED` 控制定时与外部触发启停（见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)）
+- **保持活跃**：公开仓库 60 天无活动 workflow 会被自动禁用，偶尔手动 Run 或外部触发一次即可（外部触发本身不受 60 天限制）
 
 ---
 

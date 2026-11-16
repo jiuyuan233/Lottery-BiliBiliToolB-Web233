@@ -2,30 +2,27 @@
 # 动态抽奖 —— LotteryAutoScript (Node.js)
 # 上游：https://github.com/shanmiteko/LotteryAutoScript
 # -----------------------------------------------------------------------------
-# 触发方式：
-#   1) schedule 类人类作息（北京时间，cron 用 UTC，北京=UTC+8）
-#      GitHub schedule 实测有延迟（几分钟到数小时），各时段统一提前 30 分钟起跑，目标时段不变：
-#      08:03 起跑 → 目标 08:33 检查中奖
-#      10:03 起跑 → 目标 10:33 参与抽奖（上午，timeout 20分钟≈转发26条）
-#      11:43 起跑 → 目标 12:13 参与抽奖（中午）
-#      19:03 起跑 → 目标 19:33 参与抽奖（晚上）
-#      21:33 起跑 → 目标 22:03 检查中奖
-#      周日 22:33 起跑 → 目标 23:03 清理
-#      → 三次 start 间隔均超过 1 小时，发够 26 条就休息
-#      飞书静默时段：北京时间 23:00–07:00 不推送，详见 docs/ACTIONS-SCHEDULE.md
-#   2) workflow_dispatch 手动选命令
+# 双通道定时触发（2026-11-16 重构，详见 docs/ACTIONS-SCHEDULE.md）：
+#   主通道：cron-job.org 准点 POST workflow_dispatch（外部触发基本不排队）
+#   兜底：  GitHub 内置 schedule，按实测延迟统一提前 45 分钟起跑（目标时段不变）
+#   防重复：每个时段一把原子锁（refs/heads/locks/<slot>-<日期>），先到先得——
+#           cron-job.org 或内建兜底谁先抢到锁谁执行，后到的一方自动跳过，绝不重复。
+#   所有触发均受总开关 ACTIONS_ENABLED 控制（force=true 可越过，见 docs/ACTIONS-SWITCH.md）
 # cookie 从仓库 Secrets 注入（BILI_COOKIE），扫一次码两边共用。
+# 飞书静默时段：北京时间 23:00–07:00 不推送，详见 docs/ACTIONS-SCHEDULE.md
 # =============================================================================
 name: 动态抽奖
 
 on:
   schedule:
-    - cron: '3 0 * * *'      # 北京 08:03 起跑 → 目标 08:33 — 起床检查中奖（错峰避整点）
-    - cron: '3 2 * * *'      # 北京 10:03 起跑 → 目标 10:33 — 上午参与抽奖（错峰，timeout 20分钟≈26条）
-    - cron: '43 3 * * *'     # 北京 11:43 起跑 → 目标 12:13 — 午休参与抽奖（错峰，timeout 20分钟≈26条）
-    - cron: '3 11 * * *'     # 北京 19:03 起跑 → 目标 19:33 — 晚饭后参与抽奖（错峰，timeout 20分钟≈26条）
-    - cron: '33 13 * * *'    # 北京 21:33 起跑 → 目标 22:03 — 睡前检查中奖（错峰）
-    - cron: '33 14 * * 0'    # 周日北京 22:33 起跑 → 目标 23:03 — 清理动态/关注（错峰）
+    # 兜底起跑 = 目标时段 - 45 分钟（对冲 GitHub schedule 常规延迟；错峰避整点）
+    # 目标时段由主通道 cron-job.org 准点触发，见 docs/ACTIONS-SCHEDULE.md 时段表
+    - cron: '48 23 * * *'    # 兜底：北京 07:48 起跑 → 目标 08:33 检查中奖（slot=lot-check-am）
+    - cron: '48 1 * * *'     # 兜底：北京 09:48 起跑 → 目标 10:33 参与抽奖·上午（slot=lot-start-am）
+    - cron: '28 3 * * *'     # 兜底：北京 11:28 起跑 → 目标 12:13 参与抽奖·午休（slot=lot-start-noon）
+    - cron: '48 10 * * *'    # 兜底：北京 18:48 起跑 → 目标 19:33 参与抽奖·晚上（slot=lot-start-pm）
+    - cron: '18 13 * * *'    # 兜底：北京 21:18 起跑 → 目标 22:03 检查中奖（slot=lot-check-pm）
+    - cron: '18 14 * * 0'    # 兜底：周日北京 22:18 起跑 → 目标 23:03 清理动态/关注（slot=lot-clear-sun）
   workflow_dispatch:
     inputs:
       cmd:
@@ -38,35 +35,53 @@ on:
           - clear
           - login
           - acount
+      slot:
+        description: '时段标识（外部定时触发必填，如 lot-check-am；留空=不参与防重复锁）'
+        required: false
+        default: ''
+      force:
+        description: '强制运行（越过总开关与防重复锁，用于手动测试）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # 防重复锁需要创建/清理 refs/heads/locks/*（只用 GITHUB_TOKEN，不落密钥）
+
+concurrency:
+  group: lottery-workflow
+  cancel-in-progress: false
 
 jobs:
   run:
     # ── 总开关（详见 docs/ACTIONS-SWITCH.md）────────────────────────────
-    # 仓库变量 ACTIONS_ENABLED = true 才执行定时任务；未设/false 时定时触发整体跳过
-    # 手动 workflow_dispatch 不受开关限制，随时可手动测试
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.ACTIONS_ENABLED == 'true' }}
+    # 定时触发与外部触发（cron-job.org 的 workflow_dispatch）同样受开关控制；
+    # 手动 Run workflow 时勾选 force=true 可越过开关与防重复锁（测试用）
+    if: ${{ vars.ACTIONS_ENABLED == 'true' || github.event.inputs.force == 'true' }}
     runs-on: ubuntu-latest
     # 不设 timeout-minutes，用 GitHub 默认 6 小时（最大值），避免任务被杀死
     steps:
-      # --- 根据触发方式决定命令 ---
-      - name: 决定命令
+      # --- 根据触发方式决定命令与时段 ---
+      - name: 决定命令与时段
         id: decide
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             CMD="${{ inputs.cmd }}"
+            SLOT="${{ inputs.slot }}"
           else
+            SLOT=""
             case "${{ github.event.schedule }}" in
-              "3 0 * * *")   CMD=check;;
-              "3 2 * * *")   CMD=start;;
-              "43 3 * * *")  CMD=start;;
-              "3 11 * * *")  CMD=start;;
-              "33 13 * * *") CMD=check;;
-              "33 14 * * 0") CMD=clear;;
-              *)             CMD=check;;
+              "48 23 * * *")  SLOT=lot-check-am;   CMD=check;;
+              "48 1 * * *")   SLOT=lot-start-am;   CMD=start;;
+              "28 3 * * *")   SLOT=lot-start-noon; CMD=start;;
+              "48 10 * * *")  SLOT=lot-start-pm;   CMD=start;;
+              "18 13 * * *")  SLOT=lot-check-pm;   CMD=check;;
+              "18 14 * * 0")  SLOT=lot-clear-sun;  CMD=clear;;
+              *)              SLOT="";             CMD=check;;
             esac
           fi
-          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
-          echo "::notice::本次执行命令: $CMD"
+          echo "cmd=$CMD"    >> "$GITHUB_OUTPUT"
+          echo "slot=$SLOT" >> "$GITHUB_OUTPUT"
+          echo "::notice::本次执行命令: $CMD（时段: ${SLOT:-手动/未指定}）"
 
       # --- 检查 cookie 是否配置 ---
       - name: 检查 cookie
@@ -79,18 +94,74 @@ jobs:
           fi
           echo "cookie 已就绪（长度 ${#BILI_COOKIE}）"
 
+      # --- 防重复锁：本时段先到先得，后到自动跳过（不 checkout、不占额度） ---
+      - name: 防重复锁
+        id: claim
+        env:
+          SLOT: ${{ steps.decide.outputs.slot }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ] || [ -z "$SLOT" ]; then
+            echo "::notice::强制/手动运行（未指定时段），不参与防重复锁"
+            echo "claimed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DATE=$(TZ=Asia/Shanghai date +%Y%m%d)
+          LOCK="locks/${SLOT}-${DATE}"
+          CODE=$(curl -s -o /tmp/claim.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "{\"ref\":\"refs/heads/${LOCK}\",\"sha\":\"${GITHUB_SHA}\"}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" || echo 000)
+          case "$CODE" in
+            201)
+              echo "claimed=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::抢到本时段锁 ${LOCK}，本时段由本次运行执行"
+              # 顺手清理 7 天前的过期锁（garbage collect，防堆积）
+              OLD_CUT=$(( $(TZ=Asia/Shanghai date +%Y%m%d) - 7 ))
+              for L in $(curl -s -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/heads/locks" \
+                  | jq -r '.[].ref' 2>/dev/null); do
+                NAME="${L#refs/heads/}"
+                D=$(printf '%s\n' "$NAME" | sed -n 's/.*-\([0-9]\{8\}\)$/\1/p')
+                if [ -n "$D" ] && [ "$((10#$D))" -lt "$((10#$OLD_CUT))" ]; then
+                  if curl -s -f -X DELETE -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/heads/${NAME}"; then
+                    echo "::notice::已清理过期锁 ${NAME}"
+                  else
+                    echo "::warning::过期锁 ${NAME} 清理失败（不影响本次运行）"
+                  fi
+                fi
+              done
+              ;;
+            422)
+              echo "claimed=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${LOCK} 已被更早的触发占用（外部 cron-job.org 或内建兜底已执行本时段），本次跳过、不重复执行"
+              ;;
+            *)
+              echo "::warning::锁接口异常（HTTP $CODE），为不漏时段本次照常执行（罕见情况下可能重复）"
+              echo "claimed=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
       - uses: actions/checkout@v4
+        if: steps.claim.outputs.claimed != 'false'
 
       - uses: actions/setup-node@v4
+        if: steps.claim.outputs.claimed != 'false'
         with:
           node-version: '18'
 
       # --- 克隆上游 LotteryAutoScript（保留更新渠道：每次跑都拉最新）---
       - name: 克隆 LotteryAutoScript 上游
+        if: steps.claim.outputs.claimed != 'false'
         run: git clone --depth 1 https://github.com/shanmiteko/LotteryAutoScript.git lottery-src
 
       # --- 注入 cookie（从 Secrets）与类人类作息配置 ---
       - name: 注入 cookie 与配置
+        if: steps.claim.outputs.claimed != 'false'
         env:
           BILI_COOKIE:   ${{ secrets.BILI_COOKIE }}
           BILI_COOKIE_2: ${{ secrets.BILI_COOKIE_2 }}
@@ -100,11 +171,13 @@ jobs:
           node lottery/inject-cookie.js
 
       - name: 安装依赖
+        if: steps.claim.outputs.claimed != 'false'
         run: cd lottery-src && npm install --omit=dev
 
       # --- 执行（start 命令用 timeout 限制 20 分钟≈转发 26 条，发够就停）---
       - name: 执行 ${{ steps.decide.outputs.cmd }}
         id: execute
+        if: steps.claim.outputs.claimed != 'false'
         continue-on-error: true
         run: |
           cd lottery-src
@@ -126,9 +199,9 @@ jobs:
             node main.js "$CMD" 2>&1 | tee /tmp/task-output.log
           fi
 
-      # --- 飞书通知（无论成功失败都推送，含任务专属汇报模板）---
+      # --- 飞书通知（无论成功失败都推送；防重复跳过的运行不推送）---
       - name: 飞书通知
-        if: always()
+        if: always() && steps.claim.outputs.claimed != 'false'
         env:
           FS_WEBHOOK:    ${{ secrets.FS_WEBHOOK }}
           NOTIFY_TITLE:  '动态抽奖'

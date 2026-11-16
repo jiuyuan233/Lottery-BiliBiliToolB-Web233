@@ -60,7 +60,7 @@
 
 **关键约束**：Web233 是公开仓库，**绝不存任何用户密钥**（无 Secrets）。WebAction 是私有仓库，存 cookie 和飞书 webhook。
 
-**总开关**：两仓库定时任务由仓库变量 `ACTIONS_ENABLED` 控制（`true`=定时执行，`false`/未设=定时跳过，手动触发不受限）。WebAction 设 `true`（自用），Web233 设 `false`（模板不跑）。详见 `docs/ACTIONS-SWITCH.md`。
+**总开关**：两仓库定时任务与外部触发均由仓库变量 `ACTIONS_ENABLED` 控制（`true`=执行，`false`/未设=定时与外部触发都跳过，`force=true` 可越过）。WebAction 设 `true`（自用），Web233 设 `false`（模板不跑）。详见 `docs/ACTIONS-SWITCH.md`；外部准点触发（cron-job.org）见 `docs/ACTIONS-SCHEDULE.md`。
 
 ---
 
@@ -188,18 +188,22 @@ lottery (Node.js)
 
 ```
 Step 0: 总开关（job 级 if）
-  └─ schedule 触发时要求仓库变量 ACTIONS_ENABLED=true，否则整个 job 跳过
-  └─ 手动 workflow_dispatch 不受开关限制
+  └─ 定时与外部触发都要求仓库变量 ACTIONS_ENABLED=true，否则整个 job 跳过
+  └─ force=true 时越过开关与防重复锁（手动测试用）
 
-Step 1: 决定命令
-  ├─ 手动触发 → 用 inputs.cmd
-  └─ 定时触发 → case github.event.schedule 匹配 cron → 映射到 start/check/clear
+Step 1: 决定命令与时段
+  ├─ 手动/外部触发 → 用 inputs.cmd + inputs.slot（slot 可选，不填不参与锁）
+  └─ 定时触发 → case github.event.schedule 匹配 cron → 映射到 (SLOT, CMD)
 
 Step 2: 检查 cookie
   └─ 读 secrets.BILI_COOKIE，为空则 ::error 并退出
 
-Step 3: actions/checkout@v4
-  └─ 检出本仓库代码（配置模板 + inject-cookie.js + notify-feishu.js）
+Step 2.5: 防重复锁（先到先得）
+  ├─ POST /git/refs 原子创建 refs/heads/locks/<slot>-<日期>
+  ├─ 201 = 抢到锁 → 继续执行；顺手清理 7 天前的过期锁
+  └─ 422 = 本时段已被更早触发（外部或兜底）执行 → 后续全部跳过、不推飞书
+
+Step 3: actions/checkout@v4（锁被跳过则后续步骤全部 skip）
 
 Step 4: actions/setup-node@v4
   └─ 安装 Node.js 18
@@ -224,22 +228,23 @@ Step 9: 飞书通知 (if: always())
   └─ node lottery/notify-feishu.js  ← 解析日志 → 飞书卡片
 ```
 
-**cron 时间表**（UTC，北京时间 = UTC + 8；统一**提前 30 分钟起跑**对冲 GitHub schedule 延迟，目标时段不变）：
+**双通道时间表**（目标时段为主通道 cron-job.org 准点触发时刻；兜底 cron 提前 45 分钟起跑，UTC，北京时间 = UTC + 8）：
 
-| cron (UTC) | 起跑（北京） | 目标时段 | 命令 | 说明 |
-|------------|---------|------|------|------|
-| `3 0 * * *` | 08:03 | 08:33 | check | 起床检查中奖 |
-| `3 2 * * *` | 10:03 | 10:33 | start | 上午参与抽奖 |
-| `43 3 * * *` | 11:43 | 12:13 | start | 午休参与抽奖 |
-| `3 11 * * *` | 19:03 | 19:33 | start | 晚饭后参与抽奖 |
-| `33 13 * * *` | 21:33 | 22:03 | check | 睡前检查中奖 |
-| `33 14 * * 0` | 周日 22:33 | 周日 23:03 | clear | 周末清理 |
+| slot 标识 | 兜底 cron (UTC) | 兜底起跑（北京） | 目标时段（主通道） | 命令 | 说明 |
+|------------|---------|------|------|------|------|
+| lot-check-am | `48 23 * * *` | 07:48 | 08:33 | check | 起床检查中奖 |
+| lot-start-am | `48 1 * * *` | 09:48 | 10:33 | start | 上午参与抽奖 |
+| lot-start-noon | `28 3 * * *` | 11:28 | 12:13 | start | 午休参与抽奖 |
+| lot-start-pm | `48 10 * * *` | 18:48 | 19:33 | start | 晚饭后参与抽奖 |
+| lot-check-pm | `18 13 * * *` | 21:18 | 22:03 | check | 睡前检查中奖 |
+| lot-clear-sun | `18 14 * * 0` | 周日 22:18 | 周日 23:03 | clear | 周末清理 |
 
 **关键设计**：
+- 双通道触发 — cron-job.org 外部准点为主、内置 cron 提前 45 分钟兜底（见 `docs/ACTIONS-SCHEDULE.md`）
+- 时段防重复锁 — refs/heads/locks/<slot>-<日期> 先到先得，后到自动跳过且不推送
 - `continue-on-error: true` — 执行失败不阻塞飞书通知
 - `timeout 1200` — start 命令限时 20 分钟
-- `if: always()` — 无论成功失败都推送飞书
-- cron 提前 30 分钟 — 对冲 GitHub schedule 延迟（见 `docs/ACTIONS-SCHEDULE.md`）
+- `if: always()` — 无论成功失败都推送飞书（被锁跳过的运行除外）
 - 飞书静默时段 — 北京时间 23:00–07:00 完成的任务不推送，只记 Actions 日志
 
 ### 5.2 `bilitool.yml` — B站日常任务 workflow
@@ -253,13 +258,13 @@ Step 9: 飞书通知 (if: always())
 - 任务通过 `Ray_RunTasks` 环境变量指定
 - `continue-on-error: true` 在 job 级别 — .NET 构建失败不阻塞抽奖 workflow
 
-**cron 时间表**（同样提前 30 分钟起跑）：
+**双通道时间表**（同样提前 45 分钟兜底；目标时段为主通道触发时刻）：
 
-| cron (UTC) | 起跑（北京） | 目标时段 | 任务 |
-|------------|---------|------|------|
-| `33 0 * * *` | 08:33 | 09:03 | Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege |
-| `37 3 * * *` | 11:37 | 12:07 | LiveLottery |
-| `33 10 * * *` | 18:33 | 19:03 | LiveLottery,LiveFansMedal |
+| slot 标识 | 兜底 cron (UTC) | 兜底起跑（北京） | 目标时段（主通道） | 任务 |
+|------------|---------|------|------|------|
+| bil-daily-am | `18 0 * * *` | 08:18 | 09:03 | Daily,VipBigPoint,Manga,Silver2Coin,VipPrivilege |
+| bil-lot-noon | `22 3 * * *` | 11:22 | 12:07 | LiveLottery |
+| bil-lot-pm | `18 10 * * *` | 18:18 | 19:03 | LiveLottery,LiveFansMedal |
 
 **Ray_ 环境变量映射**（.NET 强类型配置）：
 - `Ray_RunTasks` → 执行哪些任务
@@ -501,7 +506,7 @@ SHELL=/bin/sh
 
 每行调用的是 **`run-task.sh` 包装脚本**（Dockerfile COPY 进镜像）：负责执行命令 + 把输出写入 `/app/data/logs/lottery.log` + 调用 `notify-feishu.js` 推送飞书卡片（从 `env.js` 读 `FS_BOT_WEBHOOK`），与 Actions 版通知行为一致。`start` 命令的第二参数 `1200` = timeout 限时 20 分钟，124（超时）视为成功。
 
-**与 Actions 版的区别**：Docker 容器内时区已设为 `Asia/Shanghai`，所以 cron 直接用北京时间。Actions 版 cron 用 UTC（已自动换算，且提前 30 分钟起跑对冲 GitHub schedule 延迟）。Docker 版 cron 秒级精确、不进凌晨，故未设飞书静默时段（Actions 版有 23:00–07:00 静默）。
+**与 Actions 版的区别**：Docker 容器内时区已设为 `Asia/Shanghai`，所以 cron 直接用北京时间。Actions 版 cron 用 UTC（已自动换算，内置兜底提前 45 分钟起跑，准点性由 cron-job.org 外部触发保证）。Docker 版 cron 秒级精确、不进凌晨，故未设飞书静默时段（Actions 版有 23:00–07:00 静默）。
 
 ### 6.4 `lottery/entrypoint.sh` — 容器入口
 
@@ -677,9 +682,9 @@ node main.js start  ← 通过软链接读 env.js
 模拟一个「白天活跃、夜里睡觉」的真实用户行为节奏：
 
 ```
-时间轴（北京时间，图为起跑时间；cron 已统一提前 30 分钟，目标时段 = 起跑 + 30 分钟内）：
-  0────7────8────10───12───19───21───22───23
-  │睡眠期│起床│上午│午休│晚饭│睡前│ —— │清理│
+时间轴（北京时间，均为目标时段；主通道准点触发，兜底 cron 提前 45 分钟起跑）：
+  0────7────8────10───12────19───21───22───23
+  │睡眠期│起床│上午│午休│晚饭 │睡前│ —— │清理│
   │不执行│check│start│start│start│check│    │clear│
 ```
 
@@ -709,8 +714,8 @@ node main.js start  ← 通过软链接读 env.js
 | | GitHub Actions | Docker cron |
 |---|---|---|
 | 时区 | UTC（需换算） | Asia/Shanghai（Dockerfile 设了 tzdata） |
-| cron 格式 | `'3 2 * * *'`（UTC 02:03=北京10:03 起跑） | `33 10 * * *`（直接北京时间） |
-| 延迟 | 可能延迟几分钟到几小时（cron 已提前 30 分钟对冲） | 秒级精确 |
+| cron 格式 | `'48 1 * * *'`（UTC 01:48=北京 09:48 兜底起跑） | `33 10 * * *`（直接北京时间） |
+| 延迟 | 内置 schedule 延迟大（实测早间 0~90 分钟、午/晚 2~7 小时）→ 以 cron-job.org 外部准点触发为主、内置提前 45 分钟兜底 + 防重复锁 | 秒级精确 |
 | 飞书静默 | 23:00–07:00（北京）不推送 | 无需（cron 本身不进凌晨） |
 
 ---
@@ -826,12 +831,13 @@ const winKeywords = [
 **Actions 版**（`lottery.yml`）：
 ```yaml
 schedule:
-  - cron: '3 2 * * *'  # 改这里（UTC 时间 = 北京时间 - 8；提前 30 分钟起跑对冲延迟）
+  - cron: '48 1 * * *'  # 改这里（UTC 时间 = 北京时间 - 8；提前 45 分钟起跑对冲延迟）
 ```
-同时修改 `case` 语句里的 cron 匹配（两处必须一致，否则定时触发会落到默认分支）：
+同时修改 `case` 语句里的 cron 匹配与 slot 标识（两处必须一致，否则定时触发会落到默认分支）：
 ```yaml
-"3 2 * * *")   CMD=start;;
+"48 1 * * *")   SLOT=lot-start-am; CMD=start;;
 ```
+外部准点触发（cron-job.org）的时刻也要同步改，见 `docs/ACTIONS-SCHEDULE.md`。
 
 **Docker 版**（`crontab-lottery`）：
 ```cron
@@ -897,7 +903,7 @@ WebAction 和 Web233 共享的文件必须保持一致：
 0. **先查总开关**：仓库变量 `ACTIONS_ENABLED` 是否为 `true`（`false`/未设时定时触发直接跳过，见 `docs/ACTIONS-SWITCH.md`）
 1. 确认 workflow 文件在默认分支（main/master）
 2. 确认 Actions 已启用（仓库 Actions 页）
-3. schedule 可能延迟几分钟到几小时（GitHub 限制；本仓库已提前 30 分钟起跑对冲）
+3. schedule 可能延迟几分钟到几小时（GitHub 限制；本仓库以 cron-job.org 外部准点触发为主、内置提前 45 分钟兜底 + 防重复锁，晚间档延迟已被外部触发兜住）
 4. 频繁修改 workflow 会重置 schedule 注册，需 12-24h 稳定
 5. 公开仓库 60 天无活动 workflow 会被自动禁用
 
@@ -915,8 +921,8 @@ WebAction 和 Web233 共享的文件必须保持一致：
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `.github/workflows/lottery.yml` | 145 | 动态抽奖 workflow（含总开关 + 静默时段） |
-| `.github/workflows/bilitool.yml` | 112 | 日常任务 workflow（同上） |
+| `.github/workflows/lottery.yml` | ~200 | 动态抽奖 workflow（总开关 + 双通道 + 防重复锁 + 静默时段） |
+| `.github/workflows/bilitool.yml` | ~160 | 日常任务 workflow（同上） |
 | `.github/workflows/feishu-test.yml` | 44 | 飞书推送测试 |
 | `lottery/my_config.example.js` | 262 | 抽奖行为配置 |
 | `lottery/env.example.js` | 121 | 账号与推送配置 |
