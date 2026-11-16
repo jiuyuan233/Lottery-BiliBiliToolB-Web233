@@ -1,6 +1,6 @@
 # 🤝 AI 交接文档（HANDOFF）
 
-> 写给下一个接手本项目的 AI / 维护者。读完本文 + [DEVELOPMENT.md](./DEVELOPMENT.md)（仅 Web233 有）+ [COOKIE-UPDATE.md](./COOKIE-UPDATE.md)，你应能安全接手全部维护工作。
+> 写给下一个接手本项目的 AI / 维护者。读完本文 + [DEVELOPMENT.md](https://github.com/jiuyuan233/Lottery-BiliBiliToolB-Web233/blob/main/docs/DEVELOPMENT.md)（仅 Web233 有，故用跨仓链接）+ [COOKIE-UPDATE.md](./COOKIE-UPDATE.md)，你应能安全接手全部维护工作。
 > 最后交接：2026-11-16（第二次会话：全量功能验证 + 交接收尾）。
 
 ## 1. 项目一句话
