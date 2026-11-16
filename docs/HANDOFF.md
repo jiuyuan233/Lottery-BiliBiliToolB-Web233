@@ -1,7 +1,7 @@
 # 🤝 AI 交接文档（HANDOFF）
 
-> 写给下一个接手本项目的 AI / 维护者。读完本文 + [DEVELOPMENT.md](./DEVELOPMENT.md)（仅 Web233 有），你应能安全接手全部维护工作。
-> 最后交接：2026-11-15。
+> 写给下一个接手本项目的 AI / 维护者。读完本文 + [DEVELOPMENT.md](./DEVELOPMENT.md)（仅 Web233 有）+ [COOKIE-UPDATE.md](./COOKIE-UPDATE.md)，你应能安全接手全部维护工作。
+> 最后交接：2026-11-16（第二次会话：全量功能验证 + 交接收尾）。
 
 ## 1. 项目一句话
 
@@ -11,7 +11,7 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 
 | 仓库 | 可见性 | 角色 | Cookie | `ACTIONS_ENABLED` | 外部定时（cron-job.org） |
 |---|---|---|---|---|---|
-| `Lottery-BiliBiliToolB-WebAction` | 私有 | **用户自用（生产）** | Secrets 已配（BILI_COOKIE、FS_WEBHOOK、FS_APP_ID、FS_APP_SECRET） | `true`（双通道在跑） | 9 个时段任务（标题 bili-* 前缀） |
+| `Lottery-BiliBiliToolB-WebAction` | 私有 | **用户自用（生产）** | Secrets 已配（BILI_COOKIE 于 11-16 更新并实测登录 OK、FS_WEBHOOK、FS_APP_ID、FS_APP_SECRET） | `true`（双通道在跑） | 9 个时段任务（标题 bili-* 前缀） |
 | `Lottery-BiliBiliToolB-Web233` | 公开 | 模板/分享 | **故意不配**（公开仓库不存密钥） | `false`（定时关闭） | 无（fork 用户自行配置） |
 
 - 两仓库共享文件必须保持一致（清单见 DEVELOPMENT.md §11.6），改一处同步另一处，blob sha 应相同
@@ -28,7 +28,14 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 4. 审查全部 md 文档并修正过时内容（README 时间表、DEVELOPMENT.md 的 cron 表/crontab 引用/文件清单等）
 5. 在 WebAction 实际触发两个 workflow 冒烟测试通过（结果见 §6）
 
-### 2026-11-16（本次）：双通道定时重构
+### 2026-11-16（第二次会话）：cookie 更新 + 全量验证 + 交接收尾
+
+1. **cookie 过期处理**：用户旧 cookie 已失效（B 站 nav 接口返回 `isLogin=false`，服务端吊销——注意：用户第一份贴来的 cookie 就是这样，不是使用方法问题）；新 cookie 已加密写入 `BILI_COOKIE`，实测 Actions 里 `[帐号1 Cookie有效性检测] [成功登录 UID:411883458]` ✓。新增面向人类的 [COOKIE-UPDATE.md](./COOKIE-UPDATE.md)（判断过期→取新 cookie 避坑→三种更新方式→验证），后续 cookie 到期直接走该文档。
+2. **全量功能验证**（结果见 §6 验证矩阵）：YAML 语法、cron↔case 一致性、force=true 路径、飞书推送实测、锁 GC 均验证通过；发现并修复真实 bug：`notify-feishu.js` 不读 `NOTIFY_MESSAGE` 环境变量导致「飞书推送测试」的 message 输入无效（修复：命令行参数优先，其次 NOTIFY_MESSAGE）。
+3. **cron-job.org API 限流实测**：建任务连续 PUT 会返 500，间隔拉到 75~120 秒后恢复；当日高频调用后 GET /jobs 会 429（次日恢复）。**任务执行不受影响**，只影响管理类 API。已写入 ACTIONS-SCHEDULE.md。
+4. **文档全量审查**：通读两仓全部 12 个 md，修正两份 README 对比表里过时的「定时方式：GitHub cron」表述（改为双通道描述），文件清单补 COOKIE-UPDATE.md。
+
+### 2026-11-16（第一次会话）：双通道定时重构
 
 1. 调取 WebAction Actions 运行历史实测 GitHub schedule 延迟：早间档 0~90 分钟、午间档 2~3.5 小时、晚间档 4~7 小时（连续 3 天至少 8 次拖到次日凌晨），另有整段丢失——确认“凌晨消息”根因
 2. 重构两 workflow：双通道触发（cron-job.org 外部 dispatch 为主 + 内置 schedule 提前 45 分钟兜底）、时段防重复锁（refs/heads/locks/<slot>-<日期>，先到先得、后到自动跳过且不推送）、总开关同时拦截外部触发（force=true 可越过）
@@ -59,12 +66,26 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 - **B. GitHub API**：Git Data API 四步（blob → tree → commit → ref fast-forward），无需本地环境，已实战验证
 - **C. Actions 里的 AI**：Copilot coding agent（零配置）或 claude-code-action（需 API key）
 
-## 6. 2026-11-15 冒烟测试记录（WebAction）
+## 6. 功能验证矩阵（2026-11-16 两轮会话实测汇总）
 
-| workflow | 输入 | 结果 |
-|---|---|---|
-| 动态抽奖 | cmd=check | ✅ 运行成功（决定命令/checkout/克隆上游/注入 cookie/执行/通知全链路正常） |
-| B站日常任务 | tasks=Daily | ✅ 运行成功（.NET 构建 + Daily 任务链路正常） |
+| # | 功能 | 验证方式 | 结果 |
+|---|---|---|---|
+| 1 | workflow YAML 语法 | PyYAML 解析两仓 6 个 yml | ✅ 全部合法 |
+| 2 | cron ↔ case 映射 | 静态检查 9 个 cron 均有对应 case | ✅ 全命中 |
+| 3 | 总开关=关 | 向 Web233 发 dispatch → job skipped、无任务执行 | ✅ |
+| 4 | 总开关=开 | WebAction dispatch → 正常执行 | ✅ |
+| 5 | force=true 越过开关与锁 | dispatch acount+force → 日志「强制/手动运行…不参与防重复锁」 | ✅ |
+| 6 | 外部触发准点性 | 计划 17:13:00 → 实际 17:13:08 创建运行 | ✅ 误差约 8 秒 |
+| 7 | 防重复锁抢占/跳过 | 同 slot 双触发：先到完整执行，后到全部 skipped 且不推送 | ✅ |
+| 8 | 锁 GC | locks 分支不残留（过期锁自动清理） | ✅ |
+| 9 | cookie 加密更新链路 | PyNaCl sealed box → PUT Secret（201/204）→ updated_at 变化 | ✅ |
+| 10 | cookie 登录实测 | acount run 日志「成功登录 UID:411883458」 | ✅ |
+| 11 | 飞书推送 | feishu-test run 日志「[feishu] ✅ 推送成功」 | ✅ |
+| 12 | 静默时段逻辑 | workflow 通知步骤 HOUR 判断（代码审查） | ✅（23:00–07:00 跳过） |
+| 13 | Docker 版定时表 | crontab-lottery 与 README/DEVELOPMENT 表逐行对照 | ✅（未实机跑） |
+| 14 | notify webhook 回退 | 代码审查：FS_WEBHOOK env 优先 → env.js FS_BOT_WEBHOOK 回退 | ✅ |
+
+> 2026-11-15 的冒烟记录（lottery check / bilitool Daily 全链路）同样有效，见历史提交。
 
 ## 7. 关键文件速查
 
@@ -79,3 +100,4 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 | 飞书卡片 | `lottery/notify-feishu.js`（TASK_TEMPLATES） | DEVELOPMENT.md §10 |
 | 总开关 | 仓库变量 `ACTIONS_ENABLED` | ACTIONS-SWITCH.md |
 | 静默时段 | workflow 通知步骤的 HOUR 判断 | ACTIONS-SCHEDULE.md |
+| cookie 过期更新 | `BILI_COOKIE` Secret | COOKIE-UPDATE.md（含 AI 代更新标准流程） |

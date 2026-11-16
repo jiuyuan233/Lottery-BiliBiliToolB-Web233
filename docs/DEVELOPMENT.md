@@ -182,7 +182,12 @@ lottery (Node.js)
 
 ### 5.1 `lottery.yml` — 动态抽奖 workflow
 
-**触发方式**：`schedule`（6 个 cron）+ `workflow_dispatch`（手动选命令）
+**触发方式**：`schedule`（6 个兑底 cron）+ `workflow_dispatch`（手动选命令）
+
+**workflow_dispatch 输入**（cron-job.org 外部触发也走这些）：
+- `cmd` — 抽奖命令（start/check/clear/login/acount，choice）
+- `slot` — 时段标识（如 lot-start-am；外部定时必填，用于防重复锁；留空=不参与锁）
+- `force` — 勾选后越过总开关与防重复锁（手动测试用）
 
 **执行流程**（逐 step 讲解）：
 
@@ -249,7 +254,12 @@ Step 9: 飞书通知 (if: always())
 
 ### 5.2 `bilitool.yml` — B站日常任务 workflow
 
-**触发方式**：`schedule`（3 个 cron）+ `workflow_dispatch`
+**触发方式**：`schedule`（3 个兑底 cron）+ `workflow_dispatch`
+
+**workflow_dispatch 输入**（cron-job.org 外部触发也走这些）：
+- `tasks` — 任务列表（逗号分隔，如 Daily,LiveLottery）
+- `slot` — 时段标识（如 bil-daily-am；外部定时必填，用于防重复锁；留空=不参与锁）
+- `force` — 勾选后越过总开关与防重复锁（手动测试用）
 
 **与 lottery.yml 的区别**：
 - 克隆的是 `BiliBiliToolPro`（C#/.NET）
@@ -275,8 +285,10 @@ Step 9: 飞书通知 (if: always())
 
 ### 5.3 `feishu-test.yml` — 飞书推送测试
 
-手动触发，发一条测试消息验证 `FS_WEBHOOK` 配置是否正确。支持自定义消息内容、标题、模拟状态。
+手动触发，发一条测试消息验证 `FS_WEBHOOK` 配置是否正确。支持自定义消息内容（`message`，发纯文本）、标题、模拟状态。
 **不受总开关与飞书静默时段限制**（纯手动测试入口）。
+
+2026-11-16 修复：`notify-feishu.js` 此前不读 `NOTIFY_MESSAGE` 环境变量导致 `message` 输入无效，现已修复（命令行参数优先，其次 `NOTIFY_MESSAGE`）。
 
 ### 5.4 `inject-cookie.js` — cookie 注入脚本
 
@@ -317,7 +329,7 @@ else {
 
 ### 5.5 `notify-feishu.js` — 飞书推送脚本
 
-**输入**：环境变量 `FS_WEBHOOK` / `NOTIFY_TITLE` / `NOTIFY_TASK` / `NOTIFY_STATUS` / `NOTIFY_OUTPUT`
+**输入**：环境变量 `FS_WEBHOOK` / `NOTIFY_TITLE` / `NOTIFY_TASK` / `NOTIFY_STATUS` / `NOTIFY_OUTPUT` / `NOTIFY_MESSAGE`（可选：设置了则发纯文本而非卡片）
 **输出**：POST 飞书卡片消息到 webhook URL
 
 **核心逻辑**：
@@ -766,7 +778,7 @@ timeout 1200 node main.js start  # 20分钟≈26条
 ### 10.1 消息格式
 
 飞书自定义机器人支持两种消息类型：
-- `text` — 纯文本（`notify-feishu.js "自定义消息"`）
+- `text` — 纯文本（命令行参数 `node notify-feishu.js "自定义消息"`，或环境变量 `NOTIFY_MESSAGE`，如 feishu-test.yml 的 message 输入）
 - `interactive` — 卡片消息（默认，从环境变量构造）
 
 ### 10.2 卡片结构
@@ -894,7 +906,7 @@ WebAction 和 Web233 共享的文件必须保持一致：
 - `.github/workflows/lottery.yml`
 - `.github/workflows/bilitool.yml`
 - `.github/workflows/feishu-test.yml`
-- `docs/ACTIONS-SWITCH.md` / `docs/ACTIONS-SCHEDULE.md` / `docs/HANDOFF.md` / `docs/AI-UPDATES.md`
+- `docs/ACTIONS-SWITCH.md` / `docs/ACTIONS-SCHEDULE.md` / `docs/COOKIE-UPDATE.md` / `docs/HANDOFF.md` / `docs/AI-UPDATES.md`
 
 修改任一文件后，需同步到另一个仓库并推送。
 
@@ -921,15 +933,16 @@ WebAction 和 Web233 共享的文件必须保持一致：
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `.github/workflows/lottery.yml` | ~200 | 动态抽奖 workflow（总开关 + 双通道 + 防重复锁 + 静默时段） |
+| `.github/workflows/lottery.yml` | ~217 | 动态抽奖 workflow（总开关 + 双通道 + 防重复锁 + 静默时段） |
 | `.github/workflows/bilitool.yml` | ~160 | 日常任务 workflow（同上） |
 | `.github/workflows/feishu-test.yml` | 44 | 飞书推送测试 |
 | `lottery/my_config.example.js` | 262 | 抽奖行为配置 |
 | `lottery/env.example.js` | 121 | 账号与推送配置 |
 | `lottery/inject-cookie.js` | 68 | cookie 注入脚本 |
-| `lottery/notify-feishu.js` | 371 | 飞书推送脚本 |
+| `lottery/notify-feishu.js` | ~375 | 飞书推送脚本 |
 | `docs/ACTIONS-SWITCH.md` | — | 总开关说明 |
 | `docs/ACTIONS-SCHEDULE.md` | — | 定时策略与静默时段 |
+| `docs/COOKIE-UPDATE.md` | — | cookie 过期更新指南 |
 | `docs/HANDOFF.md` | — | AI 交接文档 |
 | `docs/AI-UPDATES.md` | — | AI 更新仓库指南 |
 | `README.md` | — | 项目文档 |

@@ -116,6 +116,8 @@ curl -X PUT https://api.cron-job.org/jobs \
     "notification":{"onFailure":false,"onSuccess":false,"onDisable":false,"onSslCertExpiry":false,"mode":0}}}'
 ```
 
+> 🐢 **API 限流实测经验（2026-11-16）**：连续 PUT 创建任务会被返 500，**间隔拉到 75~120 秒后恢复**；当日高频调用（建任务+查询）后 `GET /jobs` 会 429（次日恢复）。这些只影响**管理类 API**，定时任务的实际执行完全不受影响。批量建 9 个任务请预留约 15 分钟。
+
 各时段的 `inputs` 与 `hours`/`minutes` 对照（按上方时段表）：
 
 | slot | inputs body 内 | 触发时刻 |
@@ -138,8 +140,8 @@ curl -X PUT https://api.cron-job.org/jobs \
 
 ## 已知限制
 
-- GitHub schedule 的**数小时级极端延迟**仍会让兜底通道晚跑（晚到会因锁自动跳过、不重复；
-  仅当主通道也失效时才会真跑，属罕见兜底场景）——准点性由主通道保证；
+- GitHub schedule 的**数小时级极端延迟**仍会让兑底通道晚跑（晚到会因锁自动跳过、不重复；
+  仅当主通道也失效时才会真跑，属罕见兑底场景）——准点性由主通道保证；
 - 公开仓库 60 天无提交时 GitHub 会自动停用内置 schedule（外部 workflow_dispatch 不受此限制，外部定时触发本身也能保持 workflow 活跃）；
-- cron-job.org 免费账号 API 每日 100 次请求限额（仅影响建/改任务的 API 调用，不影响任务正常执行）；
+- cron-job.org 免费账号限制（11-16 实测）：**创建任务需 75~120 秒间隔**（连发返 500）；当日 API 高频调用会 429（含 GET /jobs，次日恢复）——只影响管理 API，**任务执行不受影响**；
 - 被锁跳过/静默时段压掉的推送不补发，结果以 Actions 日志为准。

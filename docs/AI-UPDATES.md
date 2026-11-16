@@ -98,4 +98,21 @@ jobs:
 
 ## 改完之后
 
-按 [HANDOFF.md](./HANDOFF.md) §6 的验证清单走一遍：YAML 语法（dispatch 一次）、cron 与 case 一致、开关语义、静默时段、两仓库 blob sha 一致、文档与实际一致。
+按 [HANDOFF.md](./HANDOFF.md) §6 的验证矩阵走一遍：YAML 语法（dispatch 一次）、cron 与 case 一致、开关语义、静默时段、两仓库 blob sha 一致、文档与实际一致。
+
+## 附：更新 Actions Secrets 的实战方法（2026-11-16 验证）
+
+Secret 值（如 `BILI_COOKIE`）不能明文 PUT，必须用仓库公钥做 libsodium sealed box 加密。
+无本地 git 环境时，纯 Python 即可完成（需 `pip install pynacl`）：
+
+1. `GET /repos/<owner>/<repo>/actions/secrets/public-key` 拿 `key_id` + `key`（base64）
+2. `SealedBox(PublicKey(b64decode(key))).encrypt(secret明文))` → base64 得 `encrypted_value`
+3. `PUT /repos/<owner>/<repo>/actions/secrets/BILI_COOKIE`，body `{"encrypted_value": ..., "key_id": ...}`；**201=新建，204=更新**
+4. `GET .../actions/secrets` 查 `updated_at` 确认
+
+实测注意：
+- 更新 `BILI_COOKIE` 前先用 bilibili nav 接口验证 cookie 有效（`isLogin=true`），**失效的 cookie 不要写入**（11-16 用户曾贴来一份已吊销的，直接写入只会让任务继续失败）；
+- 更新后 dispatch 一次 `acount`+`force=true` 实测，日志看「成功登录 UID:xxx」；
+- 临时存 cookie 的本地文件用完立即删除。
+
+完整教程（面向人类用户）见 [COOKIE-UPDATE.md](./COOKIE-UPDATE.md)。

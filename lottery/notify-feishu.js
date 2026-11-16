@@ -15,6 +15,7 @@
  *   NOTIFY_TASK    — 任务名（如 "start"、"Daily,LiveLottery"）
  *   NOTIFY_STATUS  — 执行状态（"success" / "failure"）
  *   NOTIFY_OUTPUT  — 任务输出日志（用于解析关键指标）
+ *   NOTIFY_MESSAGE — 自定义文本消息（设置了则发纯文本而非卡片；命令行参数优先）
  *   GITHUB_REPOSITORY / GITHUB_RUN_ID — Actions 自动注入
  * =============================================================================
  */
@@ -220,9 +221,10 @@ const timeStr = bjTime.toISOString().replace('T', ' ').substring(0, 19) + ' (UTC
 // =============================================================================
 let payload;
 
-if (process.argv[2]) {
-    // 简单文本消息
-    payload = { msg_type: 'text', content: { text: process.argv[2] } };
+const customText = process.argv[2] || process.env.NOTIFY_MESSAGE;
+if (customText) {
+    // 简单文本消息（命令行参数优先，其次 NOTIFY_MESSAGE 环境变量 —— feishu-test.yml 的 message 输入走这里）
+    payload = { msg_type: 'text', content: { text: customText } };
 } else {
     // --- 卡片消息 ---
     const subTasks = task.split(',').map(t => t.trim()).filter(Boolean);

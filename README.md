@@ -188,8 +188,9 @@ Lottery-BiliBiliToolB-Web233/
 ├── docs/                       # 文档
 │   ├── DEVELOPMENT.md          #   开发文档（从底层逻辑讲起）
 │   ├── ACTIONS-SWITCH.md       #   Actions 总开关（ACTIONS_ENABLED）
-│   ├── ACTIONS-SCHEDULE.md     #   定时策略与飞书静默时段
-│   ├── HANDOFF.md              #   AI/维护者交接文档
+│   ├── ACTIONS-SCHEDULE.md     #   定时策略：双通道触发 + 防重复锁 + 静默时段
+│   ├── COOKIE-UPDATE.md        #   cookie 过期更新指南（Actions 版，约 30 天一次）
+│   ├── HANDOFF.md              #   AI/维护者交接文档（含功能验证矩阵）
 │   ├── AI-UPDATES.md           #   如何让 AI 更新本仓库
 │   └── UPGRADE-BLAZOR.md       #   可选：把抽奖页真嵌进 Blazor 面板
 └── bili_tool_web/              # 面板数据（运行时生成，勿提交）
@@ -222,8 +223,8 @@ docker exec -it bili_tool_web /bin/bash  # 进面板容器
 | 运行环境 | 自有服务器 / NAS | GitHub Actions（免费） |
 | 是否需要服务器 | ✅ 需要 | ❌ 不需要 |
 | Web 管理面板 | ✅ 有（Blazor 面板，端口 22330） | ❌ 无 |
-| Cookie 管理 | Web 面板扫码 / 自动同步 | GitHub Secrets（手动更新） |
-| 定时方式 | 系统 cron | GitHub cron |
+| Cookie 管理 | Web 面板扫码 / 自动同步（无需续期） | GitHub Secrets（约 30 天手动更新，见 [COOKIE-UPDATE.md](./docs/COOKIE-UPDATE.md)） |
+| 定时方式 | 系统 cron（容器内北京时间，秒级精确） | cron-job.org 外部准点 + GitHub cron 兑底 + 防重复锁 |
 | 实时状态查看 | Web 面板实时 | Actions 运行日志 |
 | 适合人群 | 有服务器、想要 Web 面板 | 不想维护服务器 |
 
@@ -326,7 +327,7 @@ GitHub Actions 触发
 ### Actions 版注意事项
 
 - **免费额度**：私有仓库每月 2000 分钟，本项目约消耗 100–200 分钟/月；公开仓库无限制
-- **Cookie 有效期**：约 30 天，过期后需重新获取并更新 Secrets
+- **Cookie 有效期**：约 30 天，过期后按 [docs/COOKIE-UPDATE.md](./docs/COOKIE-UPDATE.md) 更新（Docker 版扫码自动续期无此问题）
 - **cron 延迟**：GitHub scheduled workflow 实测延迟可达数小时（晚间档最严重，会拖到次日凌晨）——本仓库采用 cron-job.org 外部准点触发为主、内置 cron 提前 45 分钟兜底、时段防重复锁先到先得；飞书通知在 23:00–07:00（北京）静默，深夜不会弹消息（详见 [docs/ACTIONS-SCHEDULE.md](./docs/ACTIONS-SCHEDULE.md)）
 - **总开关**：仓库变量 `ACTIONS_ENABLED` 控制定时与外部触发启停（见 [docs/ACTIONS-SWITCH.md](./docs/ACTIONS-SWITCH.md)）
 - **保持活跃**：公开仓库 60 天无活动 workflow 会被自动禁用，偶尔手动 Run 或外部触发一次即可（外部触发本身不受 60 天限制）
