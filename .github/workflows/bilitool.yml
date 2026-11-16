@@ -82,6 +82,7 @@ jobs:
         env:
           SLOT: ${{ steps.decide.outputs.slot }}
           FORCE: ${{ github.event.inputs.force }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "$FORCE" = "true" ] || [ -z "$SLOT" ]; then
             echo "::notice::强制/手动运行（未指定时段），不参与防重复锁"
