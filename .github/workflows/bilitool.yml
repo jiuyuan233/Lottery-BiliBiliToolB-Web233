@@ -10,6 +10,7 @@
 #   所有触发均受总开关 ACTIONS_ENABLED 控制（force=true 可越过，见 docs/ACTIONS-SWITCH.md）
 # cookie 从 Secrets 注入（与抽奖 workflow 共用 BILI_COOKIE，扫一次码）。
 # 注：本 job 设 continue-on-error，若 .NET 环境问题不阻塞抽奖 workflow。
+# 飞书通知：安静模式（仅中奖/疑似cookie过期/失败才推，NOTIFY_QUIET）+ 深夜静默 23:00–07:00，详见 docs/ACTIONS-SCHEDULE.md
 # =============================================================================
 name: B站日常任务
 
@@ -172,7 +173,7 @@ jobs:
           Ray_Serilog__WriteTo__9__Args__token:       ${{ secrets.PUSHPLUS_TOKEN }}
         run: dotnet run --project "${{ steps.proj.outputs.path }}" -c Release 2>&1 | tee /tmp/task-output.log
 
-      # --- 飞书通知（无论成功失败都推送；防重复跳过的运行不推送）---
+      # --- 飞书通知（安静模式：仅中奖/疑似cookie过期/失败才推；被防重复锁跳过的运行不推送）---
       - name: 飞书通知
         if: always() && steps.claim.outputs.claimed != 'false'
         env:
@@ -180,6 +181,7 @@ jobs:
           NOTIFY_TITLE:  'B站日常任务'
           NOTIFY_TASK:   ${{ steps.decide.outputs.tasks }}
           NOTIFY_STATUS: ${{ steps.execute.outcome }}
+          NOTIFY_QUIET:  'true'   # 安静模式：常规成功不推送（详见 docs/ACTIONS-SCHEDULE.md）
         run: |
           # 飞书静默时段：北京时间 23:00–07:00 不推送（schedule 延迟把任务拖进深夜时避免打扰）
           HOUR=$(TZ=Asia/Shanghai date +%H)

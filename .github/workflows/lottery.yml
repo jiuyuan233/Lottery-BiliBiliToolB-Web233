@@ -9,7 +9,7 @@
 #           cron-job.org 或内建兜底谁先抢到锁谁执行，后到的一方自动跳过，绝不重复。
 #   所有触发均受总开关 ACTIONS_ENABLED 控制（force=true 可越过，见 docs/ACTIONS-SWITCH.md）
 # cookie 从仓库 Secrets 注入（BILI_COOKIE），扫一次码两边共用。
-# 飞书静默时段：北京时间 23:00–07:00 不推送，详见 docs/ACTIONS-SCHEDULE.md
+# 飞书通知：安静模式（仅中奖/疑似cookie过期/失败才推，NOTIFY_QUIET）+ 深夜静默 23:00–07:00，详见 docs/ACTIONS-SCHEDULE.md
 # =============================================================================
 name: 动态抽奖
 
@@ -200,7 +200,7 @@ jobs:
             node main.js "$CMD" 2>&1 | tee /tmp/task-output.log
           fi
 
-      # --- 飞书通知（无论成功失败都推送；防重复跳过的运行不推送）---
+      # --- 飞书通知（安静模式：仅中奖/疑似cookie过期/失败才推；被防重复锁跳过的运行不推送）---
       - name: 飞书通知
         if: always() && steps.claim.outputs.claimed != 'false'
         env:
@@ -208,6 +208,7 @@ jobs:
           NOTIFY_TITLE:  '动态抽奖'
           NOTIFY_TASK:   ${{ steps.decide.outputs.cmd }}
           NOTIFY_STATUS: ${{ steps.execute.outcome }}
+          NOTIFY_QUIET:  'true'   # 安静模式：常规成功不推送（详见 docs/ACTIONS-SCHEDULE.md）
         run: |
           # 飞书静默时段：北京时间 23:00–07:00 不推送（schedule 延迟把任务拖进深夜时避免打扰）
           HOUR=$(TZ=Asia/Shanghai date +%H)

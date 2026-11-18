@@ -834,6 +834,50 @@ const winKeywords = [
 3. 在卡片顶部加中奖详情（从日志提取奖品名称）
 4. 中奖详情最多 5 条
 
+### 10.6 推送过滤：安静模式（NOTIFY_QUIET，2026-11-16 起）
+
+**设计动机**：用户不希望被常规成功的例行通知打扰——只有真正需要人介入的事才推飞书。
+
+**三类放行（命中即推送）**：
+
+| 检测 | 实现 | 结果 |
+|---|---|---|
+| 🎉 中奖 | `detectWin(output)` 命中关键词 | 深红 carmine 中奖卡 |
+| ⚠️ 疑似 cookie 过期 | `detectAuthFailure(output)` 命中模式 | 警示卡 + 「按 docs/COOKIE-UPDATE.md 更新」横幅 |
+| ❌ 执行失败 | `status === 'failure'`（workflow outcome） | 红色失败卡 |
+
+**实现位置与开关**：
+
+```javascript
+// notify-feishu.js
+const quiet = /^(1|true|yes)$/i.test(process.env.NOTIFY_QUIET || '');
+const isWin = detectWin(output);
+const authFailed = detectAuthFailure(output);
+if (quiet && !isWin && !authFailed && status !== 'failure') {
+    console.log('[feishu] 🔕 安静模式：常规成功运行（无中奖、无登录异常），跳过推送');
+    process.exit(0);   // 在构造卡片前直接退出，零网络请求
+}
+```
+
+**默认开启的地方**：
+- `lottery.yml` / `bilitool.yml`「飞书通知」步骤 env：`NOTIFY_QUIET: 'true'`
+- Docker 版 `lottery/run-task.sh`：`export NOTIFY_QUIET=1`
+- `feishu-test.yml` **不设**（测试入口需全量推送验证链路）
+
+**detectAuthFailure 模式**（避免「成功登录」误报——常规成功日志不含这些词）：
+
+```javascript
+const authPatterns = [
+    /账号未登录/,
+    /登录(已)?(过期|失效)/,
+    /Cookie有效性检测.*?(失败|未登录)/,
+    /(SESSDATA|[Cc]ookie).{0,30}(过期|失效|无效|错误)/,
+    /-101(?!\d)/,
+];
+```
+
+**验证**（2026-11-16）：本地 6 用例全过（安静跳过/中奖放行/cookie放行/失败放行/未设全量/「成功登录」不误报）+ 真机 acount 成功运行日志出现「🔕 安静模式…跳过推送」且未发飞书消息。
+
 ---
 
 ## 11. 扩展与修改指南

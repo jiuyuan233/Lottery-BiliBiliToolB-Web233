@@ -10,8 +10,10 @@
 #   1. 执行 node main.js <command>（可选 timeout 限时）
 #   2. 输出写入日志文件 /app/data/logs/lottery.log
 #   3. 自动调用 notify-feishu.js 推送飞书卡片（从 env.js 读 FS_BOT_WEBHOOK）
+#      —— 安静模式（NOTIFY_QUIET=1，与 Actions 版一致）：
+#         仅 中奖/疑似cookie过期/执行失败 才推送，常规成功只记日志不打扰
 #
-# 与 GitHub Actions 版保持一致：每次执行后都推送飞书通知。
+# 与 GitHub Actions 版保持一致：推送过滤规则见 docs/ACTIONS-SCHEDULE.md。
 # =============================================================================
 set -e
 
@@ -60,6 +62,9 @@ fi
 
 # 传日志输出（尾部 200 行，与 Actions 版一致）
 export NOTIFY_OUTPUT=$(echo "$OUTPUT" | tail -200)
+
+# 安静模式：常规成功不推送（仅中奖/疑似cookie过期/失败才推，与 Actions 版一致）
+export NOTIFY_QUIET=1
 
 # 调用飞书推送（失败不影响主流程）
 node /app/notify-feishu.js >/dev/null 2>&1 || true

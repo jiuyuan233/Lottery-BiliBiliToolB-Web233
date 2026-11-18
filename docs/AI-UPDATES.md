@@ -98,7 +98,7 @@ jobs:
 
 ## 改完之后
 
-按 [HANDOFF.md](./HANDOFF.md) §6 的验证矩阵走一遍：YAML 语法（dispatch 一次）、cron 与 case 一致、开关语义、静默时段、两仓库 blob sha 一致、文档与实际一致。
+按 [HANDOFF.md](./HANDOFF.md) §6 的验证矩阵走一遍：YAML 语法（dispatch 一次）、cron 与 case 一致、开关语义、推送过滤（安静模式三类放行 + 常规成功跳过，可用本地 `NOTIFY_QUIET=true` 快速自测）、静默时段、两仓库 blob sha 一致、文档与实际一致。
 
 ## 附：更新 Actions Secrets 的实战方法（2026-11-16 验证）
 

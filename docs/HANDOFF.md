@@ -1,7 +1,7 @@
 # 🤝 AI 交接文档（HANDOFF）
 
 > 写给下一个接手本项目的 AI / 维护者。读完本文 + [DEVELOPMENT.md](https://github.com/jiuyuan233/Lottery-BiliBiliToolB-Web233/blob/main/docs/DEVELOPMENT.md)（仅 Web233 有，故用跨仓链接）+ [COOKIE-UPDATE.md](./COOKIE-UPDATE.md)，你应能安全接手全部维护工作。
-> 最后交接：2026-11-16（第二次会话：全量功能验证 + 交接收尾）。
+> 最后交接：2026-11-16（第三次会话：飞书推送降噪·安静模式）。
 
 ## 1. 项目一句话
 
@@ -19,6 +19,14 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 - 定时为**双通道**：cron-job.org 外部准点触发为主 + GitHub 内置 schedule 提前 45 分钟兜底，时段**防重复锁先到先得**（同一时段绝不重复，见 [ACTIONS-SCHEDULE.md](./ACTIONS-SCHEDULE.md)）；飞书**静默时段 23:00–07:00（北京）**
 
 ## 3. 历次交接会话记录
+
+### 2026-11-16（第三次会话）：飞书推送降噪（安静模式）
+
+1. **用户需求**：除 中奖/cookie过期/其他异常 外不推送飞书 → `notify-feishu.js` 新增安静模式（`NOTIFY_QUIET=true/1`）：三类放行（`detectWin` 中奖 / `detectAuthFailure` 疑似cookie过期 / status=failure），其余常规成功 `exit 0` 只记日志；疑似cookie过期卡片标题带「⚠️ 疑似Cookie过期」+ 正文「按 docs/COOKIE-UPDATE.md 更新」指引
+2. **默认开启位置**：lottery.yml / bilitool.yml「飞书通知」步骤 env `NOTIFY_QUIET: 'true'`；Docker 版 run-task.sh `export NOTIFY_QUIET=1`；feishu-test.yml **不设**（测试入口全量推送不受影响）
+3. **detectAuthFailure 模式**：账号未登录 / 登录(已)过期失效 / Cookie有效性检测失败 / (SESSDATA|Cookie){0,30}(过期|失效|无效|错误) / -101——「成功登录 UID:xxx」等常规成功日志不误报（专门验证过）
+4. **验证**：本地 6 用例全过（安静跳过/中奖放行/cookie放行/失败放行/未设全量/成功登录不误报）+ HTTPS 拦截钩子验证三类卡片内容 + 真机 acount 成功运行日志「🔕 安静模式…跳过推送」且未发飞书
+5. **文档同步**：ACTIONS-SCHEDULE.md（推送策略：安静模式+静默时段两小节）、两 README 推送描述、DEVELOPMENT.md §10.6、COOKIE-UPDATE.md、本文件与 AI-UPDATES.md
 
 ### 2026-11-15（上一次）
 
@@ -84,6 +92,10 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 | 12 | 静默时段逻辑 | workflow 通知步骤 HOUR 判断（代码审查） | ✅（23:00–07:00 跳过） |
 | 13 | Docker 版定时表 | crontab-lottery 与 README/DEVELOPMENT 表逐行对照 | ✅（未实机跑） |
 | 14 | notify webhook 回退 | 代码审查：FS_WEBHOOK env 优先 → env.js FS_BOT_WEBHOOK 回退 | ✅ |
+| 15 | 安静模式：常规成功不推送 | 本地 6 用例 + 真机 acount 成功 run 日志「🔕 安静模式…跳过推送」且无飞书消息 | ✅ |
+| 16 | 安静模式：三类放行 | 本地用例（中奖/cookie异常/失败）均发起推送；HTTPS 拦截验证卡片含中奖卡/警示卡/失败卡关键内容 | ✅ |
+| 17 | feishu-test 不受安静模式影响 | 该 workflow 不设 NOTIFY_QUIET，默认全量（同日早前已实测推送成功） | ✅ |
+| 18 | Docker run-task 安静模式 | `export NOTIFY_QUIET=1` 与 Actions 版规则一致（代码审查，未实机跑） | ✅ |
 
 > 2026-11-15 的冒烟记录（lottery check / bilitool Daily 全链路）同样有效，见历史提交。
 
@@ -98,6 +110,7 @@ B 站自动化**胶水层**：[LotteryAutoScript](https://github.com/shanmiteko/
 | 抽奖行为 | `lottery/my_config.example.js` | DEVELOPMENT.md §5.6 |
 | cookie 注入逻辑 | `lottery/inject-cookie.js`（Actions）/ `sync/sync_cookie.py`（Docker） | DEVELOPMENT.md §5.4 / §6.6 |
 | 飞书卡片 | `lottery/notify-feishu.js`（TASK_TEMPLATES） | DEVELOPMENT.md §10 |
+| 推送过滤（安静模式） | workflow「飞书通知」步骤 env 的 NOTIFY_QUIET / run-task.sh | ACTIONS-SCHEDULE.md §推送策略、DEVELOPMENT.md §10.6 |
 | 总开关 | 仓库变量 `ACTIONS_ENABLED` | ACTIONS-SWITCH.md |
 | 静默时段 | workflow 通知步骤的 HOUR 判断 | ACTIONS-SCHEDULE.md |
 | cookie 过期更新 | `BILI_COOKIE` Secret | COOKIE-UPDATE.md（含 AI 代更新标准流程） |

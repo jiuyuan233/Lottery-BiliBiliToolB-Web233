@@ -16,6 +16,7 @@
  *   NOTIFY_STATUS  — 执行状态（"success" / "failure"）
  *   NOTIFY_OUTPUT  — 任务输出日志（用于解析关键指标）
  *   NOTIFY_MESSAGE — 自定义文本消息（设置了则发纯文本而非卡片；命令行参数优先）
+ *   NOTIFY_QUIET   — 安静模式（"true"/"1"：仅 中奖/疑似cookie过期/执行失败 才推送，常规成功不推送）
  *   GITHUB_REPOSITORY / GITHUB_RUN_ID — Actions 自动注入
  * =============================================================================
  */
@@ -43,6 +44,19 @@ const runId   = process.env.GITHUB_RUN_ID     || '';
 
 if (!webhook) {
     console.log('[feishu] 未配置 FS_WEBHOOK / FS_BOT_WEBHOOK，跳过推送');
+    process.exit(0);
+}
+
+// =============================================================================
+// 安静模式（NOTIFY_QUIET=true，两个业务 workflow 默认开启）
+// 只有三类情况才推送：🎉 中奖 / ⚠️ 疑似 cookie 过期等登录异常 / ❌ 执行失败(status=failure)
+// 常规成功运行不推送、只记日志（「飞书推送测试」workflow 不设此变量，仍可全量测试）
+// =============================================================================
+const quiet = /^(1|true|yes)$/i.test(process.env.NOTIFY_QUIET || '');
+const isWin = detectWin(output);
+const authFailed = detectAuthFailure(output);
+if (quiet && !isWin && !authFailed && status !== 'failure') {
+    console.log('[feishu] 🔕 安静模式：常规成功运行（无中奖、无登录异常），跳过推送');
     process.exit(0);
 }
 
@@ -179,6 +193,22 @@ function detectWin(log) {
     return false;
 }
 
+// =============================================================================
+// ⚠️ 疑似 cookie 过期 / 登录失效检测 — 命中任一即视为需推送的异常
+// （常规成功日志如「Cookie有效性检测] [成功登录」不会误报，见模式设计）
+// =============================================================================
+function detectAuthFailure(log) {
+    if (!log) return false;
+    const authPatterns = [
+        /账号未登录/,
+        /登录(已)?(过期|失效)/,
+        /Cookie有效性检测.*?(失败|未登录)/,
+        /(SESSDATA|[Cc]ookie).{0,30}(过期|失效|无效|错误)/,
+        /-101(?!\d)/,
+    ];
+    return authPatterns.some(p => p.test(log));
+}
+
 function extractWinDetails(log) {
     const details = [];
     const prizePatterns = [
@@ -230,8 +260,7 @@ if (customText) {
     const subTasks = task.split(',').map(t => t.trim()).filter(Boolean);
     const elements = [];
 
-    // 🎉 中奖检测
-    const isWin = detectWin(output);
+    // 🎉 中奖检测（isWin 已在安静模式预判时算好，此处直接复用）
     const winDetails = isWin ? extractWinDetails(output) : [];
 
     // 状态行
@@ -248,6 +277,10 @@ if (customText) {
         headerText = '🎉🎉🎉 中奖通知！';
         st.color = 'carmine';   // 深红色 — 最醒目
         st.emoji = '🎉';
+    } else if (authFailed) {
+        // ⚠️ 疑似 cookie 过期 — 标题直接点明，引导用户去更新
+        headerText = `${title} — ⚠️ 疑似Cookie过期`;
+        st.emoji = '⚠️';
     }
 
     // 内容
@@ -265,6 +298,13 @@ if (customText) {
         } else {
             content += '\n🏆 **检测到中奖，请查看日志了解详情**\n';
         }
+        content += '\n---\n\n';
+    }
+
+    // ⚠️ 疑似 cookie 过期提示（仅次于中奖的醒目级别）
+    if (authFailed && !isWin) {
+        content += '\n⚠️ **疑似 Cookie 过期 / 登录失效**\n';
+        content += '**>>> 请按 docs/COOKIE-UPDATE.md 更新 BILI_COOKIE <<<**\n';
         content += '\n---\n\n';
     }
 
